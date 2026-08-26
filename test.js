@@ -11,20 +11,22 @@ import { createGame, setup, takeTurn, getScore, getState, activate } from './eng
 const byName = Object.fromEntries(cards.map((c) => [c.name, c]));
 
 // Клонируем карту, чтобы каждый экземпляр в колоде был уникальной ссылкой
-// (нужно для проверки непересечения зон по ссылке).
+// (нужно для проверки непересечения зон по ссылке). Эффекты клонируем глубоко,
+// чтобы мутации движка не попадали на шаблоны cards.js.
 function cloneCard(name) {
   const c = byName[name];
   const clone = { ...c };
   if (c.tags) clone.tags = [...c.tags];
-  if (c.attached) clone.attached = [];
-  if (c.accumulated) clone.accumulated = [];
+  if (c.effects) clone.effects = c.effects.map((e) => ({ ...e }));
+  if (c.activate) clone.activate = c.activate.map((e) => ({ ...e }));
+  if (c.attach) clone.attach = { ...c.attach };
   return clone;
 }
 
 // Порядок колоды: индекс 0 = низ, последний элемент = верх (снимается первым).
-function makeGame(order, choose) {
+function makeGame(order, choose, rng) {
   const deck = order.map((name) => cloneCard(name));
-  const game = createGame({ deck });
+  const game = createGame({ deck, rng });
   setup(game, { choose });
   return game;
 }
@@ -163,23 +165,24 @@ test('D1: Кровать накрывает самого левого челов
 });
 
 test('D2: Палёный алкоголь копит по 1 карте с верха каждый ход, при 3 сбрасывает себя и кучу', () => {
-  // prep -> затем Палёный алкоголь (arrow up). Колода после: 3 карты для накопления.
+  // Порядок (верх = начало): [Ваня, Оля, Денис, Палёный, A, B, C, D, E]
+  // prep берёт первые 3 (Ваня,Оля,Денис). В колоде остаётся Палёный на вершине.
+  // turn1: Палёный в Зону Угрозы. turn2/3/4 накапливает A,C,E (3 шт) -> сброс себя+кучи.
   const game = makeGame(
-    ['Ваня', 'Оля', 'Денис', 'Палёный алкоголь', 'Комната 402', 'Тост', 'Денис'],
+    ['Ваня', 'Оля', 'Денис', 'Палёный алкоголь', 'Комната 402', 'Тост', 'Оля', 'Денис', '3-й сосед'],
     'Ваня'
   );
-  takeTurn(game, 'discard'); // Палёный алкоголь -> Зона Угрозы, начинает копить
-  // Каждый последующий ход кладёт по 1 взакрытую под неё.
-  takeTurn(game, 'discard'); // 1-я накопленная
+  takeTurn(game, 'discard'); // Палёный алкоголь -> Зона Угрозы
+  takeTurn(game, 'discard'); // turnStart: 1-я накопленная
   takeTurn(game, 'discard'); // 2-я накопленная
   takeTurn(game, 'discard'); // 3-я -> достигает 3 -> сброс себя + кучи
   const s = getState(game);
   const burnt = s.threat.find((c) => c.name === 'Палёный алкоголь');
   assert.equal(burnt, undefined); // сам сброшен
   const discardedNames = s.discard.map((c) => c.name);
-  assert.equal(discardedNames.includes('Комната 402'), true);
-  assert.equal(discardedNames.includes('Тост'), true);
-  assert.equal(discardedNames.includes('Денис'), true);
+  assert.equal(discardedNames.includes('Оля'), true); // одна из накопленных (C)
+  assert.equal(discardedNames.includes('Тост'), true); // взятая (B)
+  assert.equal(discardedNames.includes('Денис'), true); // взятая (D)
 });
 
 test('D3: Шура: бухой заменяет Шуру и делает Шум = 2 Угрозы', () => {
@@ -197,12 +200,12 @@ test('D3: Шура: бухой заменяет Шуру и делает Шум 
 
 test('D4: Паша: бухой заменяет Пашу и замешивает 1 Угрозу взакрытую', () => {
   const game = makeGame(['Паша', 'Оля', 'Денис', 'Паша: бухой'], 'Паша');
-  const deckBefore = getState(game).deck.length;
   takeTurn(game, 'buy'); // Паша: бухой заменяет Пашу, +1 Угроза в колоду
   const s = getState(game);
   assert.equal(s.home.find((c) => c.name === 'Паша'), undefined);
   assert.ok(s.home.find((c) => c.name === 'Паша: бухой'));
-  assert.equal(s.deck.length, deckBefore + 1); // замещена 1 Угроза
+  // взятие съело 1 карту колоды, pullReserve добавило 1 Угрозу — в колоде появилась карта-Угроза
+  assert.ok(s.deck.some((c) => c.arrow === 'up'), 'ожидалась замещённая Угроза в колоде');
 });
 
 test('D5: Хит под гитаристом даёт +1 ПО', () => {
@@ -327,10 +330,10 @@ function assertInvariants(game) {
     'Обход учтён как Угроза'
   );
 
-  // Поражение => счёт 0; счёт всегда конечен и >= 0.
+  // Поражение => счёт 0; счёт конечен и целый (может быть отрицательным —
+  // сумма ПО карт, включая отрицательные, по правилам не ограничена снизу).
   const score = getScore(game);
   assert.equal(Number.isInteger(score), true, 'score not integer');
-  assert.ok(score >= 0, `score negative: ${score}`);
   if (s.status === 'lost') assert.equal(score, 0, 'lost but score != 0');
 
   return { realThreats: realThreats.length, total: countAllCards(s) };
@@ -388,9 +391,9 @@ function simulate(seed) {
   for (let i = 0; i < n; i++) {
     order.push(CARD_POOL[Math.floor(rng() * CARD_POOL.length)]);
   }
-  const top3 = order.slice(-3);
+  const top3 = order.slice(0, 3);
   const choose = top3[Math.floor(rng() * 3)];
-  const game = makeGame(order, choose);
+  const game = makeGame(order, choose, rng);
   assertInvariants(game);
   let turns = 0;
   while (game.status === 'playing' && turns < 20000) {
@@ -429,6 +432,214 @@ test('G2: разные seed обычно дают разные партии (н�
   // Хотя бы 2 различных исхода среди 10 — проверка, что ГПСЧ реально варьирует.
   assert.ok(results.size >= 2, 'fuzz выдаёт одинаковые партии независимо от seed');
 });
+
+// ---- H. Golden-сценарии по уникальным эффектам -------------------------
+// Таблица: каждый сценарий изолирует один эффект/поведение и проверяет
+// детерминированный исход. Дублирует часть D, но здесь это каноническая
+// спецификация поведения карт (per-effect regression).
+
+const GOLDEN = [
+  {
+    id: 'arrow-up', card: 'Шум',
+    order: ['Ваня', 'Оля', 'Денис', 'Шум'], choose: 'Ваня',
+    run: (g) => takeTurn(g, 'discard'),
+    expect: (g) => {
+      const s = getState(g);
+      assert.ok(s.threat.some((c) => c.name === 'Шум'));
+      assert.equal(s.energy, 2); // стрелка не меняет энергию
+    },
+  },
+  {
+    id: 'arrow-down', card: 'Шура: бухой',
+    order: ['Ваня', 'Оля', 'Денис', 'Шура: бухой'], choose: 'Ваня',
+    run: (g) => takeTurn(g, 'buy'),
+    expect: (g) => {
+      const s = getState(g);
+      assert.ok(s.home.some((c) => c.name === 'Шура: бухой'));
+      assert.equal(s.energy, 2);
+    },
+  },
+  {
+    id: 'replace', card: 'Шура: бухой',
+    order: ['Шура', 'Оля', 'Денис', 'Шура: бухой'], choose: 'Шура',
+    run: (g) => takeTurn(g, 'buy'),
+    expect: (g) => {
+      const s = getState(g);
+      assert.ok(s.home.some((c) => c.name === 'Шура: бухой'));
+      assert.equal(s.home.find((c) => c.name === 'Шура'), undefined);
+    },
+  },
+  {
+    id: 'setFlag+endGameIf', card: 'Шура: бухой + Обход',
+    order: ['Ваня', 'Оля', 'Денис', 'Шум', 'Шура: бухой', 'Шум', 'Обход'], choose: 'Ваня',
+    run: (g) => { while (g.status === 'playing') takeTurn(g, 'discard'); },
+    expect: (g) => {
+      const s = getState(g);
+      assert.equal(s.flags.shumCountsAsTwoThreats, true);
+      assert.equal(s.status, 'lost');
+      assert.equal(getScore(g), 0);
+    },
+  },
+  {
+    id: 'sleep', card: 'Кровать',
+    order: ['Ваня', 'Оля', 'Денис', 'Кровать'], choose: 'Ваня',
+    run: (g) => takeTurn(g, 'buy'),
+    expect: (g) => {
+      const s = getState(g);
+      const v = s.home.find((c) => c.name === 'Ваня');
+      assert.equal(v.asleep, true);
+      assert.equal(getScore(g), 0);
+    },
+  },
+  {
+    id: 'pullReserve', card: 'Паша: бухой',
+    order: ['Паша', 'Оля', 'Денис', 'Паша: бухой'], choose: 'Паша',
+    run: (g) => takeTurn(g, 'buy'),
+    expect: (g) => {
+      const s = getState(g);
+      assert.ok(s.home.find((c) => c.name === 'Паша: бухой'));
+      assert.ok(s.deck.some((c) => c.arrow === 'up'), 'замешана Угроза в колоду');
+    },
+  },
+  {
+    id: 'accumulate', card: 'Палёный алкоголь',
+    order: ['Ваня', 'Оля', 'Денис', 'Палёный алкоголь', 'Комната 402', 'Тост', 'Оля', 'Денис', '3-й сосед'],
+    choose: 'Ваня',
+    run: (g) => { for (let i = 0; i < 4; i++) takeTurn(g, 'discard'); },
+    expect: (g) => {
+      const s = getState(g);
+      assert.equal(s.threat.find((c) => c.name === 'Палёный алкоголь'), undefined);
+      const names = s.discard.map((c) => c.name);
+      assert.ok(names.includes('Оля') && names.includes('Тост') && names.includes('Денис'));
+    },
+  },
+  {
+    id: 'modifyVp', card: 'Порванная струна',
+    order: ['Ваня', 'Оля', 'Денис', 'Порванная струна'], choose: 'Ваня',
+    run: (g) => takeTurn(g, 'discard'),
+    expect: (g) => {
+      const s = getState(g);
+      assert.equal(s.home.find((c) => c.name === 'Ваня').vpEffective, 0);
+      assert.equal(getScore(g), 0);
+    },
+  },
+  {
+    id: 'addVp', card: 'Конфликт',
+    order: ['Паша', 'Оля', 'Денис', 'Паша: бухой', 'Комната 402', 'Шура', 'Конфликт'],
+    choose: 'Паша',
+    run: (g) => {
+      takeTurn(g, 'buy'); // Паша: бухой (замешивает +1 Угрозу в колоду)
+      // pullReserve сбивает порядок взятия — гоним до конца: Конфликт (arrow-down)
+      // гарантированно войдёт в Дом при взятии.
+      while (g.status === 'playing') {
+        const a = getState(g).energy >= 2 ? 'buy' : 'discard';
+        takeTurn(g, a);
+      }
+    },
+    expect: (g) => {
+      const pb = getState(g).home.find((c) => c.name === 'Паша: бухой');
+      assert.equal(pb.vpEffective, -1);
+    },
+  },
+  {
+    id: 'bonusVp', card: 'Тост',
+    order: ['Ваня', 'Оля', 'Денис', 'День рождения!', 'Тост'], choose: 'Ваня',
+    run: (g) => {
+      while (g.status === 'playing') {
+        const a = getState(g).energy >= 2 ? 'buy' : 'discard';
+        takeTurn(g, a);
+      }
+    },
+    expect: (g) => {
+      const s = getState(g);
+      assert.equal(s.home.find((c) => c.name === 'Тост').vpEffective, 2);
+    },
+  },
+  {
+    id: 'buyFreeIf', card: 'Плов',
+    order: ['Паша', 'Оля', 'Денис', 'Плов', 'Комната 402'], choose: 'Паша',
+    run: (g) => {
+      takeTurn(g, 'buy'); // Плов сразу в Дом бесплатно (Паша в игре)
+      takeTurn(g, 'discard'); // Комната 402 +1 -> 3
+    },
+    expect: (g) => {
+      const s = getState(g);
+      assert.ok(s.home.find((c) => c.name === 'Плов'));
+      assert.equal(s.energy, 3); // не потрачено на покупку
+    },
+  },
+  {
+    id: 'scorePerPerson', card: 'Большая вечеринка',
+    order: ['Ваня', 'Оля', 'Денис', 'Большая вечеринка', 'Комната 402', 'Оля', 'Денис'],
+    choose: 'Ваня',
+    run: (g) => {
+      while (g.status === 'playing') {
+        const a = getState(g).energy >= 2 ? 'buy' : 'discard';
+        takeTurn(g, a);
+      }
+    },
+    expect: (g) => { assert.equal(getScore(g), 3); },
+  },
+  {
+    id: 'attach', card: 'Хит',
+    order: ['Ваня', 'Оля', 'Денис', 'Хит'], choose: 'Ваня',
+    run: (g) => takeTurn(g, 'buy'),
+    expect: (g) => {
+      const s = getState(g);
+      const v = s.home.find((c) => c.name === 'Ваня');
+      assert.ok(v.attached && v.attached.some((c) => c.name === 'Хит'));
+      assert.equal(getScore(g), 2);
+    },
+  },
+  {
+    id: 'endGameIf', card: 'Обход',
+    order: ['Ваня', 'Оля', 'Денис', 'Шум', 'Порванная струна', 'Шум', 'Обход', 'Шум'],
+    choose: 'Ваня',
+    run: (g) => { while (g.status === 'playing') takeTurn(g, 'discard'); },
+    expect: (g) => {
+      assert.equal(getState(g).status, 'lost');
+      assert.equal(getScore(g), 0);
+    },
+  },
+  {
+    id: 'discardTarget(activate)', card: 'Старшекур',
+    order: ['Ваня', 'Оля', 'Денис', 'Старшекур', 'Шум'], choose: 'Ваня',
+    run: (g) => {
+      takeTurn(g, 'discard'); // Шум -> угроза
+      takeTurn(g, 'buy'); // Старшекур -> дом
+      activate(g, 'Старшекур');
+    },
+    expect: (g) => {
+      const s = getState(g);
+      assert.equal(s.threat.find((c) => c.name === 'Шум'), undefined);
+      assert.ok(s.discard.some((c) => c.name === 'Шум'));
+    },
+  },
+  {
+    id: 'peekReorder(activate)', card: 'Массовый перекур',
+    order: ['Ваня', 'Оля', 'Денис', 'Массовый перекур', 'Комната 402', 'Тост', 'Денис'],
+    choose: 'Ваня',
+    run: (g) => {
+      takeTurn(g, 'discard');
+      takeTurn(g, 'discard');
+      takeTurn(g, 'buy'); // Массовый перекур -> дом
+      const before = getState(g).deck.length;
+      activate(g, 'Массовый перекур');
+      assert.equal(getState(g).deck.length, before); // длина колоды не меняется
+    },
+    expect: () => { assert.ok(true); },
+  },
+];
+
+for (const sc of GOLDEN) {
+  test(`H: ${sc.id} (${sc.card})`, () => {
+    const g = makeGame(sc.order, sc.choose, lcg(0xc0ffee));
+    assertInvariants(g);
+    sc.run(g);
+    assertInvariants(g);
+    sc.expect(g);
+  });
+}
 
 // ---- TODO: активация 🔄 и выбор ⚡ (до реализации движка уточняется API) ----
 // - activate(game, cardName) уже используется в D7.

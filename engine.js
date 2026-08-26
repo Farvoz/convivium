@@ -22,6 +22,7 @@ function matches(card, match) {
   if (!match) return true;
   if (match.name && card.name !== match.name) return false;
   if (match.tags && !match.tags.every((t) => card.tags && card.tags.includes(t))) return false;
+  if (match.person && !isPerson(card)) return false;
   return true;
 }
 
@@ -143,6 +144,9 @@ function runEnter(game, card) {
       owner.attached = owner.attached || [];
       owner.attached.push(card);
       card.attachedTo = owner.name;
+    } else {
+      removeFromZone(game.home, card);
+      game.discard.push(card);
     }
   }
 }
@@ -263,7 +267,10 @@ function recompute(game) {
   const inPlay = inPlayCards(game);
   for (const c of inPlay) c.vpEffective = c.asleep ? 0 : c.vp || 0;
   for (const c of inPlay) {
-    if (c.attached) for (const a of c.attached) c.vpEffective += a.attach?.bonusVp || 0;
+    if (c.attached) for (const a of c.attached) {
+      c.vpEffective += a.vp || 0;
+      if (a.attach?.bonusVp && c.tags?.includes('guitarist')) c.vpEffective += a.attach.bonusVp;
+    }
   }
   for (const c of inPlay) {
     for (const e of c.effects || []) {

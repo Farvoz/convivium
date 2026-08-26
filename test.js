@@ -215,8 +215,28 @@ test('D5: Хит под гитаристом даёт +1 ПО', () => {
   const s = getState(game);
   const vanya = s.home.find((c) => c.name === 'Ваня');
   assert.ok(vanya.attached && vanya.attached.some((c) => c.name === 'Хит'));
-  // Ваня vp1 + Хит vp1 = 2
-  assert.equal(getScore(game), 2);
+  // Ваня vp1 + Хит база 1 + бонус под гитаристом 1 = 3
+  assert.equal(getScore(game), 3);
+});
+
+test('D5b: Хит под не-гитаристом даёт только базу 1 ПО', () => {
+  // Паша (man, vp0) в Доме. Хит аттачится под Пашу, бонуса нет.
+  const game = makeGame(['Паша', 'Оля', 'Денис', 'Хит'], 'Паша');
+  takeTurn(game, 'buy');
+  const s = getState(game);
+  const pasha = s.home.find((c) => c.name === 'Паша');
+  assert.ok(pasha.attached && pasha.attached.some((c) => c.name === 'Хит'));
+  assert.equal(getScore(game), 1);
+});
+
+test('D5c: Хит без человека в Доме уходит в сброс', () => {
+  // Без человека Хит некуда подложить -> сброс, очки не даёт.
+  const game = makeGame(['Плов', 'Оля', 'Денис', 'Хит'], 'Плов');
+  takeTurn(game, 'buy');
+  const s = getState(game);
+  assert.ok(!s.home.some((c) => c.name === 'Хит'));
+  assert.ok(s.discard.some((c) => c.name === 'Хит'));
+  assert.equal(getScore(game), 1); // Плов vp1, Хит в сбросе
 });
 
 test('D6: Порванная струна обнуляет ПО гитаристов', () => {
@@ -588,7 +608,7 @@ const GOLDEN = [
       const s = getState(g);
       const v = s.home.find((c) => c.name === 'Ваня');
       assert.ok(v.attached && v.attached.some((c) => c.name === 'Хит'));
-      assert.equal(getScore(g), 2);
+      assert.equal(getScore(g), 3);
     },
   },
   {

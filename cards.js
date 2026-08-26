@@ -64,8 +64,8 @@ const cards = [
   },
   {
     name: 'Хит',
-    description: '❗️ Если подложить под гитариста, то принесет ещё дополнительно 1 ПО',
-    attach: { match: { tags: ['guitarist'] }, bonusVp: 1 },
+    description: '❗️ Подложи под любого человека: +1 ПО. Если под гитариста — ещё +1 ПО. Если некого — в сброс.',
+    attach: { match: { person: true }, bonusVp: 1 },
     vp: 1,
   },
   {

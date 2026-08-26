@@ -122,10 +122,6 @@ const cards = [
     tags: ['man'],
   },
   {
-    name: 'Денис',
-    tags: ['man'],
-  },
-  {
     name: '3-й сосед',
     tags: ['man'],
   },

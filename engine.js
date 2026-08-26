@@ -80,7 +80,7 @@ function setup(game, { choose } = {}) {
   const top3 = game.deck.splice(0, 3);
   let chosen;
   if (choose) {
-    chosen = top3.find((c) => c.name === choose) || top3[0];
+    chosen = choose(top3);
   } else {
     chosen = game.choose(top3);
   }
@@ -186,12 +186,23 @@ function applyEffects(game, card, phase) {
 // --- активация 🔄 ---------------------------------------------------------
 
 function activate(game, name) {
-  const all = [...game.home, ...game.threat, ...game.discard];
-  const card = all.find((c) => c.name === name && c.cost === '🔄');
+  const inPlay = [...game.home, ...game.threat];
+  let card = inPlay.find((c) => c.name === name && c.cost === '🔄');
+  let fromPlay = true;
+  if (!card) {
+    card = game.discard.find((c) => c.name === name && c.cost === '🔄');
+    fromPlay = false;
+  }
   if (!card) return game;
   for (const e of card.activate || []) {
     if (e.if && !conditionMet(game, e.if)) continue;
     runEffect(game, card, e);
+  }
+  // 🔄 — «цена» сброса: активируемая карта уходит в сброс (без начисления энергии).
+  if (fromPlay) {
+    const zone = game.home.includes(card) ? game.home : game.threat;
+    removeFromZone(zone, card);
+    game.discard.push(card);
   }
   recompute(game);
   return game;

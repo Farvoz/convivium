@@ -29,7 +29,10 @@ function cloneCard(name) {
 function makeGame(order, choose, rng) {
   const deck = order.map((name) => cloneCard(name));
   const game = createGame({ deck, rng });
-  setup(game, { choose });
+  const chooseFn = typeof choose === 'function'
+    ? choose
+    : (opts) => opts.find((c) => c.name === choose) || opts[0];
+  setup(game, { choose: chooseFn });
   return game;
 }
 
@@ -292,6 +295,41 @@ test('D8b: Большая вечеринка +1 ПО за человека пр�
   // люди в игре: Ваня(man), Оля(woman) = 2 человека => +2 ПО
   // Ваня vp1 + Оля 0 + Большая вечеринка 0 + бонус 2 = 3
   assert.equal(getScore(game), 3);
+});
+
+// ---- D9. Активация 🔄 сбрасывает саму карту-источник (цена сброса) -------
+
+test('D9: активация 🔄 из Дома применяет эффект и уходит в сброс без энергии', () => {
+  // prep: Ваня(guitarist) в Дом. Затем Порванная струна (угроза), затем Натянуть струну (купим в Дом).
+  const game = makeGame(
+    ['Ваня', 'Оля', 'Денис', 'Порванная струна', 'Натянуть струну'],
+    'Ваня'
+  );
+  takeTurn(game, 'discard'); // Порванная струна -> Зона Угрозы
+  takeTurn(game, 'buy');     // Натянуть струну -> Дом (энергия 2 -> 0)
+  const before = getState(game).energy;
+  activate(game, 'Натянуть струну'); // 🔄: сбросить Порванную струну + сама уходит в сброс
+  const s = getState(game);
+  assert.equal(s.threat.find((c) => c.name === 'Порванная струна'), undefined, 'Порванная струна не сброшена');
+  assert.equal(s.home.find((c) => c.name === 'Натянуть струну'), undefined, 'карта-источник осталась в Доме');
+  assert.ok(s.discard.some((c) => c.name === 'Натянуть струну'), 'карта-источник не в сбросе');
+  assert.equal(s.energy, before, 'активация дала энергию (не должна)');
+});
+
+test('D9b: повторная активация 🔄 из сброса не возвращает карту в игру', () => {
+  const game = makeGame(
+    ['Ваня', 'Оля', 'Денис', 'Порванная струна', 'Натянуть струну'],
+    'Ваня'
+  );
+  takeTurn(game, 'discard');
+  takeTurn(game, 'buy');
+  activate(game, 'Натянуть струну'); // из Дома -> сброс
+  const inPlayBefore = [...getState(game).home, ...getState(game).threat].length;
+  activate(game, 'Натянуть струну'); // из сброса: эффект без цели, карта остаётся в сбросе
+  const s = getState(game);
+  assert.equal(s.home.find((c) => c.name === 'Натянуть струну'), undefined);
+  assert.ok(s.discard.some((c) => c.name === 'Натянуть струну'));
+  assert.equal([...s.home, ...s.threat].length, inPlayBefore, 'число карт в игре изменилось при повторе');
 });
 
 // ---- E. Инварианты -------------------------------------------------------

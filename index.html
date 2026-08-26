@@ -43,12 +43,22 @@
       </div>
 
       <div id="center-area">
-        <div id="center-card" class="card center"></div>
-        <div id="action-buttons" class="action-buttons hidden">
-          <button id="btn-discard" class="btn-act btn-discard">Сбросить</button>
-          <button id="btn-buy" class="btn-act btn-buy">Купить</button>
+        <div id="activation-bar" class="activation-bar hidden">
+          <span class="hint">Фаза активации: примени эффекты 🔄 или бери карту</span>
+          <button id="btn-take" class="btn-primary">Взять карту</button>
         </div>
-        <div id="hint-swipe" class="hint-swipe hidden">← сбросить · купить →</div>
+        <div id="play-row">
+          <div id="center-card" class="card center"></div>
+          <div id="play-info" class="play-info"></div>
+          <div id="play-actions" class="play-actions hidden">
+            <button id="btn-discard" class="btn-choice discard" aria-label="Сбросить">
+              <span class="lbl">↩ Сброс</span>
+            </button>
+            <button id="btn-buy" class="btn-choice buy" aria-label="Купить">
+              <span class="lbl">🛒 Купить</span>
+            </button>
+          </div>
+        </div>
       </div>
 
       <div id="energy" class="energy">⚡ <span id="energy-val">0</span></div>
@@ -59,7 +69,23 @@
       </div>
 
       <footer id="game-footer">
-        <span id="deck-count">Колод: 0</span>
+        <div id="deck-glass" class="beer-glass" role="img" aria-label="Осталось карт: 0">
+          <svg viewBox="0 0 40 56" xmlns="http://www.w3.org/2000/svg">
+            <defs>
+              <clipPath id="glassClip">
+                <path d="M7,8 L31,8 L31,45 Q31,50 26,50 L12,50 Q7,50 7,45 Z"/>
+              </clipPath>
+            </defs>
+            <g clip-path="url(#glassClip)">
+              <g id="beer">
+                <rect x="7" y="8" width="24" height="42" fill="#e0a13f"/>
+                <ellipse cx="19" cy="10" rx="12" ry="3.2" fill="#fff7e8"/>
+              </g>
+            </g>
+            <path class="glass-outline" d="M5,6 L33,6 L33,46 Q33,52 27,52 L11,52 Q5,52 5,46 Z"/>
+            <path class="glass-handle" d="M33,15 Q40,15 40,25 Q40,35 33,35"/>
+          </svg>
+        </div>
         <button id="btn-discard-view" class="btn-small">Сброс</button>
       </footer>
     </section>

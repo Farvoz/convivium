@@ -84,11 +84,12 @@ function buildDeck() {
   const all = cards.map(cloneCard);
   const obhod = all.find((c) => c.name === 'Обход');
   const threats = all.filter(isThreatTemplate);
-  const rest = all.filter((c) => !isThreatTemplate(c) && c.name !== 'Обход');
+  const autos = all.filter((c) => c.arrow === 'down');  // автокарты (стрелка вниз)
+  const rest = all.filter((c) => !isThreatTemplate(c) && c.name !== 'Обход' && !autos.includes(c));
   shuffle(rest);
   const prep3 = rest.splice(0, 3);            // открытые 3 для подготовки
   const extraThreats = shuffle(threats.filter((c) => c.name !== 'Обход')).slice(0, 3);
-  const injected = [obhod, ...extraThreats];  // Обход + 3 угрозы обратно в колоду
+  const injected = [obhod, ...extraThreats, ...autos];  // Обход + 3 угрозы + автокарты обратно в колоду
   for (const t of injected) {
     const idx = Math.floor(Math.random() * (rest.length + 1));
     rest.splice(idx, 0, t);
@@ -105,6 +106,7 @@ let busy = false;
 let currentCanBuy = false;
 let autoTimer = null;
 let logEntries = [];
+let deckTotal = null;
 
 const setScreen = (name) => {
   for (const s of ['start', 'prep', 'game', 'end']) {
@@ -203,7 +205,9 @@ function stripCardEl(c) {
 function render() {
   const s = getState(game);
   $('energy-val').textContent = s.energy;
-  $('deck-count').textContent = 'Колод: ' + s.deck.length;
+  if (deckTotal == null) deckTotal = s.deck.length;
+  const frac = Math.max(0, Math.min(1, s.deck.length / deckTotal));
+  updateBeerGlass(frac, s.deck.length);
 
   const realThreats = s.threat.filter(isThreatCard).length;
   $('threat-strip').classList.toggle('warn', realThreats >= 3);
@@ -212,6 +216,17 @@ function render() {
   for (const c of s.threat) tw.appendChild(stripCardEl(c));
   const hw = $('home-cards'); hw.innerHTML = '';
   for (const c of s.home) hw.appendChild(stripCardEl(c));
+}
+
+function updateBeerGlass(frac, count) {
+  const beer = $('beer');
+  if (beer) beer.style.transform = 'translateY(' + ((1 - frac) * 42) + 'px)';
+  const g = $('deck-glass');
+  if (g) g.setAttribute('aria-label', 'Осталось карт: ' + count);
+}
+
+function hideArrows() {
+  $('play-actions').classList.add('hidden');
 }
 
 function renderCenter(card) {
@@ -255,19 +270,48 @@ async function startTurn() {
   runTurnStart(game);                 // накопление Палёного и пр.
   render();
   if (game.deck.length === 0) { game.status = 'won'; endGame(); return; }
+
+  // Фаза активации 🔄 — ДО взятия новой карты (правила, шаг 1 хода).
+  const activatable = collectActivatable();
+  if (activatable.length > 0) {
+    showActivationPhase(activatable);
+    return;                            // ждём решения игрока -> proceedToDraw()
+  }
+  proceedToDraw();
+}
+
+// 🔄-карты, готовые к активации (находятся в игре: Дом или Угрозы).
+function collectActivatable() {
+  return [...game.home, ...game.threat].filter((c) => c.cost === '🔄');
+}
+
+function showActivationPhase() {
+  document.body.classList.add('phase-activate');
+  $('activation-bar').classList.remove('hidden');
+  $('center-card').classList.add('hidden');
+  $('btn-take').onclick = proceedToDraw;
+  pushLog('Фаза активации: примени эффекты 🔄 или бери карту');
+  render();
+}
+
+function proceedToDraw() {
+  if (game.status !== 'playing') { endGame(); return; }
+  document.body.classList.remove('phase-activate');
+  $('activation-bar').classList.add('hidden');
+  $('center-card').classList.remove('hidden');
   topCard = getTopCard(game);
   renderCenter(topCard);
-  await wait(260);
-  enableDecision(topCard);
+  hideArrows();
+  wait(260).then(() => enableDecision(topCard));
 }
 
 function enableDecision(card) {
   if (autoTimer) { clearTimeout(autoTimer); autoTimer = null; }
   disableSwipe();
-  showActions(false);
-  $('hint-swipe').classList.add('hidden');
+  hideArrows();
 
   if (card.arrow) {                   // стрелка — авто без выбора
+    updatePlayInfo(card);
     setTimeout(() => resolveAndAnimate(card, null), 720);
     return;
   }
@@ -277,15 +321,26 @@ function enableDecision(card) {
   }
   enableSwipe(card);
   showActions(currentCanBuy);
-  if (currentCanBuy) $('hint-swipe').classList.remove('hidden');
 }
 
 function showActions(canBuy) {
-  const ab = $('action-buttons');
-  ab.classList.toggle('hidden', !canBuy);
-  if (canBuy) {
-    $('btn-discard').onclick = () => resolveAndAnimate(topCard, 'discard');
-    $('btn-buy').onclick = () => resolveAndAnimate(topCard, 'buy');
+  updatePlayInfo(topCard);
+  $('play-actions').classList.remove('hidden');
+  $('btn-buy').classList.toggle('hidden', !canBuy);
+  $('btn-discard').onclick = () => resolveAndAnimate(topCard, 'discard');
+  $('btn-buy').onclick = () => resolveAndAnimate(topCard, 'buy');
+}
+
+function updatePlayInfo(card) {
+  const info = $('play-info');
+  if (!card) { info.textContent = ''; return; }
+  if (card.arrow === 'up') {
+    info.innerHTML = '<span class="up">⬆ Угроза</span> — уходит в зону угроз';
+  } else if (card.arrow === 'down') {
+    info.innerHTML = '<span class="down">⬇ Авто</span> — сразу в Дом';
+  } else {
+    const buyE = isBuyFree(card) ? '<span class="pos">0⚡</span>' : '<span class="neg">−2⚡</span>';
+    info.innerHTML = 'Сброс <span class="pos">+1⚡</span> · Купить ' + buyE;
   }
 }
 
@@ -299,8 +354,7 @@ async function resolveAndAnimate(card, action) {
   if (busy || !card) return;
   busy = true;
   disableSwipe();
-  showActions(false);
-  $('hint-swipe').classList.add('hidden');
+  hideArrows();
 
   const dir = flyDirection(card, action);
   $('center-card').classList.add('fly-' + dir);
@@ -455,6 +509,7 @@ function newGame() {
   game = createGame({ deck: buildDeck() });
   logEntries = [];
   busy = false;
+  deckTotal = null;
   goPrep();
 }
 

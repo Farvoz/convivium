@@ -91,7 +91,7 @@ const cards = [
   {
     name: 'Конфликт',
     description: 'Если в игре Паша: бухой, то -1 ПО',
-    arrow: 'down',
+    arrow: 'up',
     effects: [{ op: 'addVp', match: { name: 'Паша: бухой' }, amount: -1, if: { name: 'Паша: бухой' } }],
   },
   {
@@ -104,6 +104,7 @@ const cards = [
     name: 'Кровать',
     description: "❗️ При входе в игру накрывает самого левого человека. Он теперь \"спит\"",
     effects: [{ when: 'enter', op: 'sleep', selector: 'leftmostPerson' }],
+    arrow: 'down'
   },
   {
     name: 'Палёный алкоголь',
@@ -154,4 +155,4 @@ const cards = [
   },
 ];
 
-export { cards };
+globalThis.cards = cards;

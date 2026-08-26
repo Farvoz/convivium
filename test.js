@@ -1,10 +1,12 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
-import { cards } from './cards.js';
-// API-контракт будущего движка (engine.js). Тесты упадут на импорте,
-// пока движок не реализован.
-import { createGame, setup, takeTurn, getScore, getState, activate } from './engine.js';
+// cards.js / engine.js выставляют данные и API через globalThis
+// (работают и как классические скрипты в браузере, и в Node ESM при импорте).
+import './cards.js';
+import './engine.js';
+const { cards } = globalThis;
+const { createGame, setup, takeTurn, getScore, getState, activate } = globalThis.Convivium;
 
 // ---- helpers -------------------------------------------------------------
 

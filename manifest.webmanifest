@@ -1,0 +1,14 @@
+{
+  "name": "Convivium",
+  "short_name": "Convivium",
+  "description": "Карточная соло-игра про вечеринку",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#f3e9d2",
+  "theme_color": "#f3e9d2",
+  "icons": [
+    { "src": "icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" }
+  ]
+}

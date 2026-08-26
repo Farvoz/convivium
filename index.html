@@ -1,0 +1,121 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="theme-color" content="#f3e9d2" />
+  <title>Convivium</title>
+  <link rel="manifest" href="manifest.webmanifest" />
+  <link rel="apple-touch-icon" href="icon.svg" />
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <div id="app">
+
+    <!-- Start -->
+    <section id="screen-start" class="screen">
+      <div class="start-box">
+        <div class="logo">🥂</div>
+        <h1>Convivium</h1>
+        <p class="lead">Доживи до конца колоды и набери побольше очков.</p>
+        <button id="btn-start" class="btn-primary">Играть</button>
+      </div>
+    </section>
+
+    <!-- Prep -->
+    <section id="screen-prep" class="screen hidden">
+      <h2>Подготовка</h2>
+      <p class="hint">Выбери одну карту бесплатно в Дом. Остальные уйдут в сброс.</p>
+      <div id="prep-cards" class="card-row"></div>
+    </section>
+
+    <!-- Game -->
+    <section id="screen-game" class="screen hidden">
+      <header id="game-header" tabindex="0">
+        <span class="hdr-label">Событие</span>
+        <span id="last-event">Начинаем…</span>
+        <span class="hdr-chev">▴</span>
+      </header>
+
+      <div id="threat-strip" class="strip">
+        <div class="strip-label">Угрозы</div>
+        <div id="threat-cards" class="strip-cards"></div>
+      </div>
+
+      <div id="center-area">
+        <div id="center-card" class="card center"></div>
+        <div id="action-buttons" class="action-buttons hidden">
+          <button id="btn-discard" class="btn-act btn-discard">Сбросить</button>
+          <button id="btn-buy" class="btn-act btn-buy">Купить</button>
+        </div>
+        <div id="hint-swipe" class="hint-swipe hidden">← сбросить · купить →</div>
+      </div>
+
+      <div id="energy" class="energy">⚡ <span id="energy-val">0</span></div>
+
+      <div id="home-strip" class="strip">
+        <div class="strip-label">Дом</div>
+        <div id="home-cards" class="strip-cards"></div>
+      </div>
+
+      <footer id="game-footer">
+        <span id="deck-count">Колод: 0</span>
+        <button id="btn-discard-view" class="btn-small">Сброс</button>
+      </footer>
+    </section>
+
+    <!-- End -->
+    <section id="screen-end" class="screen hidden">
+      <div class="end-box">
+        <div id="end-emoji" class="logo">🎉</div>
+        <h1 id="end-title">Победа!</h1>
+        <p id="end-score">Очки: 0</p>
+        <p id="end-sub" class="hint"></p>
+        <button id="btn-again" class="btn-primary">Играть снова</button>
+      </div>
+    </section>
+
+    <!-- Log drawer -->
+    <div id="log-drawer" class="drawer hidden">
+      <div class="drawer-head">
+        <span>События</span>
+        <button id="log-close" class="btn-small">✕</button>
+      </div>
+      <ul id="log-list"></ul>
+    </div>
+
+    <!-- Detail overlay -->
+    <div id="detail-overlay" class="overlay hidden">
+      <div class="overlay-inner">
+        <div id="detail-card" class="card detail"></div>
+        <button id="detail-close" class="btn-small wide">Закрыть</button>
+      </div>
+    </div>
+
+    <!-- Discard overlay -->
+    <div id="discard-overlay" class="overlay hidden">
+      <div class="overlay-inner">
+        <div class="overlay-head">
+          <span>Сброс</span>
+          <button id="discard-close" class="btn-small">✕</button>
+        </div>
+        <div id="discard-cards" class="card-grid"></div>
+      </div>
+    </div>
+
+    <!-- Choice overlay (target pick) -->
+    <div id="choice-overlay" class="overlay hidden">
+      <div class="overlay-inner">
+        <div class="overlay-head">
+          <span id="choice-title">Выбери</span>
+        </div>
+        <div id="choice-cards" class="card-row"></div>
+      </div>
+    </div>
+
+  </div>
+  <script src="cards.js"></script>
+  <script src="engine.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>

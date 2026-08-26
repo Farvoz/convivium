@@ -2,7 +2,7 @@
 // Универсальный: вся логика карт живёт в cards.js как DSL; здесь — интерпретатор
 // примитивов, фазы хода и подсчёт. Новые фазы добавляются в PHASES + handler.
 
-import { cards as CARDS } from './cards.js';
+const CARDS = globalThis.cards;
 
 // Порядок фаз хода. Расширяется добавлением имени + обработчика в runPhase/applyEffect.
 const PHASES = ['turnStart', 'enter', 'turnEnd'];
@@ -36,7 +36,7 @@ function conditionMet(game, cond) {
 
 // --- состояние ------------------------------------------------------------
 
-export function createGame({ deck, reserve, choose, rng } = {}) {
+function createGame({ deck, reserve, choose, rng } = {}) {
   const game = {
     deck: deck ? deck.slice() : [],
     home: [],
@@ -75,7 +75,7 @@ function cloneThreatTemplate(game) {
 
 // --- подготовка -----------------------------------------------------------
 
-export function setup(game, { choose } = {}) {
+function setup(game, { choose } = {}) {
   // Верх колоды = начало массива (индекс 0). Преп открывает первые 3.
   const top3 = game.deck.splice(0, 3);
   let chosen;
@@ -93,9 +93,28 @@ export function setup(game, { choose } = {}) {
 
 // --- ход ------------------------------------------------------------------
 
-export function takeTurn(game, action) {
+function takeTurn(game, action) {
+  if (game.status !== 'playing') return game;
+  runTurnStart(game);
+  return resolveTop(game, action);
+}
+
+// --- интерактивные примитивы (для пошагового UI) -------------------------
+// Разбивают takeTurn на фазы, чтобы UI мог показать карту и дать решение
+// до её размещения (важно из-за фазы turnStart, съедающей верх колоды).
+
+function runTurnStart(game) {
   if (game.status !== 'playing') return game;
   runPhase(game, 'turnStart');
+  return game;
+}
+
+function getTopCard(game) {
+  return game.deck[0] || null;
+}
+
+function resolveTop(game, action) {
+  if (game.status !== 'playing') return game;
   if (game.deck.length === 0) {
     finishIfWon(game);
     return game;
@@ -166,7 +185,7 @@ function applyEffects(game, card, phase) {
 
 // --- активация 🔄 ---------------------------------------------------------
 
-export function activate(game, name) {
+function activate(game, name) {
   const all = [...game.home, ...game.threat, ...game.discard];
   const card = all.find((c) => c.name === name && c.cost === '🔄');
   if (!card) return game;
@@ -299,7 +318,7 @@ function recompute(game) {
 
 // --- подсчёт очков --------------------------------------------------------
 
-export function getScore(game) {
+function getScore(game) {
   if (game.status === 'lost') return 0;
   recompute(game);
   const inPlay = inPlayCards(game);
@@ -338,7 +357,7 @@ function finishIfWon(game) {
   if (game.status === 'playing' && game.deck.length === 0) game.status = 'won';
 }
 
-export function getState(game) {
+function getState(game) {
   return {
     deck: game.deck,
     home: game.home,
@@ -350,3 +369,8 @@ export function getState(game) {
     log: game.log,
   };
 }
+
+// Браузер (классический скрипт, file://) получает API через глобал.
+globalThis.Convivium = {
+  createGame, setup, takeTurn, runTurnStart, getTopCard, resolveTop, activate, getState, getScore,
+};

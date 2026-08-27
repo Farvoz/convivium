@@ -83,13 +83,12 @@ function vpStars(vp) {
 function buildDeck() {
   const all = cards.map(cloneCard);
   const obhod = all.find((c) => c.name === 'Обход');
-  const threats = all.filter(isThreatTemplate);
-  const autos = all.filter((c) => c.arrow === 'down');  // автокарты (стрелка вниз)
-  const rest = all.filter((c) => !isThreatTemplate(c) && c.name !== 'Обход' && !autos.includes(c));
+  const harmful = all.filter((c) => isThreatTemplate(c) || c.arrow === 'down');  // Угрозы + автокарты (стрелка вниз), без Обхода
+  const rest = all.filter((c) => c.name !== 'Обход' && !harmful.includes(c));
   shuffle(rest);
   const prep3 = rest.splice(0, 3);            // открытые 3 для подготовки
-  const extraThreats = shuffle(threats.filter((c) => c.name !== 'Обход')).slice(0, 3);
-  const injected = [obhod, ...extraThreats, ...autos];  // Обход + 3 угрозы + автокарты обратно в колоду
+  const extra = shuffle(harmful).slice(0, 3);  // 3 случайных вредных (угрозы или автокарты)
+  const injected = [obhod, ...extra];  // Обход + 3 случайных вредных обратно в колоду
   for (const t of injected) {
     const idx = Math.floor(Math.random() * (rest.length + 1));
     rest.splice(idx, 0, t);
@@ -130,9 +129,9 @@ function pushLog(msg) {
 // ---------------------------------------------------------------------------
 // Рендер карты
 // ---------------------------------------------------------------------------
-function renderCardEl(card, { compact = false } = {}) {
+function renderCardEl(card, { compact = false, detail = false } = {}) {
   const el = document.createElement('div');
-  el.className = 'card' + (compact ? ' compact' : '');
+  el.className = 'card' + (compact ? ' compact' : '') + (detail ? ' detail' : '');
   if (card.asleep) el.classList.add('asleep');
 
   const img = document.createElement('div');
@@ -151,10 +150,17 @@ function renderCardEl(card, { compact = false } = {}) {
   const body = document.createElement('div');
   body.className = 'card-body';
 
+  const head = document.createElement('div');
+  head.className = 'card-head';
+  body.appendChild(head);
+
   const name = document.createElement('div');
   name.className = 'card-name';
   name.textContent = card.name;
-  body.appendChild(name);
+  head.appendChild(name);
+
+  const meta = document.createElement('div');
+  meta.className = 'card-head-meta';
 
   const vp = card.vpEffective != null ? card.vpEffective : (card.vp || 0);
   const stars = vpStars(vp);
@@ -162,14 +168,15 @@ function renderCardEl(card, { compact = false } = {}) {
     const v = document.createElement('div');
     v.className = 'card-vp';
     v.innerHTML = stars;
-    body.appendChild(v);
+    meta.appendChild(v);
   }
   if (card.tags && card.tags.length) {
     const t = document.createElement('div');
     t.className = 'card-tags';
     t.innerHTML = card.tags.map((tg) => `<span class="tag">${TAG_ICON[tg] || tg}</span>`).join('');
-    body.appendChild(t);
+    meta.appendChild(t);
   }
+  if (meta.childNodes.length) head.appendChild(meta);
   if (!compact && card.description) {
     const d = document.createElement('div');
     d.className = 'card-desc';
@@ -232,9 +239,9 @@ function hideArrows() {
 
 function renderCenter(card) {
   const wrap = $('center-card');
-  wrap.className = 'card center pop-in';
+  wrap.className = 'pop-in';
   wrap.innerHTML = '';
-  wrap.appendChild(renderCardEl(card));
+  wrap.appendChild(renderCardEl(card, { detail: true }));
 }
 
 // ---------------------------------------------------------------------------
@@ -465,7 +472,7 @@ function chooseFromThreats() {
 function openDetail(c) {
   const d = $('detail-card');
   d.innerHTML = '';
-  d.appendChild(renderCardEl(c));
+  d.appendChild(renderCardEl(c, { detail: true }));
   if (c.attached && c.attached.length) {
     const sub = document.createElement('div');
     sub.className = 'card-desc';

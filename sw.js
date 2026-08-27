@@ -1,4 +1,5 @@
-const CACHE = 'convivium-v1';
+const VERSION = 'v2';
+const CACHE = 'convivium-' + VERSION;
 const ASSETS = [
   './', './index.html', './style.css', './app.js', './cards.js', './engine.js',
   './manifest.webmanifest', './icon.svg',
@@ -20,13 +21,27 @@ self.addEventListener('activate', (e) => {
 
 self.addEventListener('fetch', (e) => {
   if (e.request.method !== 'GET') return;
-  e.respondWith(
-    caches.match(e.request).then((r) =>
-      r || fetch(e.request).then((resp) => {
+
+  if (e.request.mode === 'navigate') {
+    e.respondWith(
+      fetch(e.request).then((resp) => {
         const cp = resp.clone();
-        caches.open(CACHE).then((c) => c.put(e.request, cp));
+        caches.open(CACHE).then((c) => c.put('./index.html', cp));
         return resp;
       }).catch(() => caches.match('./index.html'))
-    )
+    );
+    return;
+  }
+
+  e.respondWith(
+    caches.match(e.request).then((r) => {
+      const network = fetch(e.request).then((resp) => {
+        if (resp && resp.status === 200) {
+          caches.open(CACHE).then((c) => c.put(e.request, resp.clone()));
+        }
+        return resp;
+      }).catch(() => r);
+      return r || network;
+    })
   );
 });

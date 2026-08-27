@@ -240,6 +240,20 @@ test('D5c: Хит без человека в Доме уходит в сброс
   assert.equal(getScore(game), 1);
 });
 
+test('D5d: Хит можно выбрать не самого левого человека', () => {
+  const chooseFn = (opts) => opts.find((c) => c.name === 'Оля') || opts[0];
+  const g = createGame({ deck: [cloneCard('Хит')], choose: chooseFn });
+  g.home = [cloneCard('Ваня'), cloneCard('Оля')];
+  g.energy = 2;
+  const after = takeTurn(g, 'buy');
+  const s = getState(after);
+  const vanya = s.home.find((c) => c.name === 'Ваня');
+  const olya = s.home.find((c) => c.name === 'Оля');
+  assert.ok(!(vanya.attached || []).some((c) => c.name === 'Хит'), 'Хит не должен быть у левого Вани');
+  assert.ok(olya.attached && olya.attached.some((c) => c.name === 'Хит'), 'Хит должен быть у выбранной Оли');
+  assert.equal(getScore(after), 2); // Ваня(1) + Оля(1) + Хит база под Олей(1)
+});
+
 test('D6: Порванная струна обнуляет ПО гитаристов', () => {
   let game = makeGame(['Ваня', 'Оля', 'Денис', 'Порванная струна'], 'Ваня');
   game = takeTurn(game, 'discard');

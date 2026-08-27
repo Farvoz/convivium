@@ -104,6 +104,7 @@ let topCard = null;
 let busy = false;
 let currentCanBuy = false;
 let autoTimer = null;
+let inActivatePhase = false;
 let logEntries = [];
 let deckTotal = null;
 
@@ -205,7 +206,7 @@ function renderCardEl(card, { compact = false, detail = false } = {}) {
 
 function stripCardEl(c) {
   const el = renderCardEl(c, { compact: true });
-  if (c.cost === '🔄') {
+  if (inActivatePhase && c.cost === '🔄') {
     el.classList.add('activatable');
     el.title = 'Активировать';
     el.onclick = () => onActivate(c.name);
@@ -291,6 +292,7 @@ function drawAndReveal() {
   if (game.status !== 'playing') { endGame(); return; }
   busy = true;
   disableSwipe();
+  inActivatePhase = false;
   document.body.classList.remove('phase-activate');
   const buy = $('btn-buy');
   buy.querySelector('.lbl').textContent = 'Купить';
@@ -341,8 +343,11 @@ async function startTurn() {
   // это фаза активации (подсветка и тап по 🔄 в лентах).
   const activatable = collectActivatable();
   if (activatable.length > 0) {
+    inActivatePhase = true;
     document.body.classList.add('phase-activate');
     pushLog('Фаза активации: примени эффекты 🔄 или бери карту');
+  } else {
+    inActivatePhase = false;
   }
   showTakePhase();
 }
@@ -458,7 +463,17 @@ async function resolveAndAnimate(card, action) {
   $('center-card').classList.add('fly-' + dir);
   await wait(420);
 
+  if (action === 'buy' && card.attach && card.attach.choose) {
+    const pool = game.home.filter((c) => matches(c, card.attach.match));
+    if (pool.length > 1) {
+      const chosen = await chooseFromPersons(card.attach.match);
+      if (chosen === null) { busy = false; return; }
+      game.choose = () => chosen;
+    }
+  }
+
   game = resolveTop(game, action);
+  game.choose = (opts) => opts[0];
   logResolve(card, action);
   render();
 
@@ -516,6 +531,7 @@ function disableSwipe() {
 // ---------------------------------------------------------------------------
 async function onActivate(cardName) {
   if (busy || game.status !== 'playing') return;
+  if (!inActivatePhase) return;
   const card = [...game.home, ...game.threat].find((c) => c.name === cardName && c.cost === '🔄');
   if (!card) return;
 
@@ -535,6 +551,10 @@ async function onActivate(cardName) {
   game = activate(game, cardName);
   game.choose = (opts) => opts[0];
   pushLog('Активировано: ' + cardName);
+  if (collectActivatable().length === 0) {
+    inActivatePhase = false;
+    document.body.classList.remove('phase-activate');
+  }
   render();
   busy = false;
 }
@@ -551,6 +571,24 @@ function chooseFromThreats() {
       const el = renderCardEl(t, { compact: true });
       el.classList.add('clickable');
       el.onclick = () => { ov.classList.add('hidden'); resolve(t); };
+      list.appendChild(el);
+    }
+    ov.classList.remove('hidden');
+  });
+}
+
+function chooseFromPersons(match) {
+  return new Promise((resolve) => {
+    const ov = $('choice-overlay');
+    const list = $('choice-cards');
+    list.innerHTML = '';
+    const persons = game.home.filter((c) => matches(c, match || {}));
+    if (persons.length === 0) { resolve(null); return; }
+    $('choice-title').textContent = 'Подложить под кого?';
+    for (const p of persons) {
+      const el = renderCardEl(p, { compact: true });
+      el.classList.add('clickable');
+      el.onclick = () => { ov.classList.add('hidden'); resolve(p); };
       list.appendChild(el);
     }
     ov.classList.remove('hidden');

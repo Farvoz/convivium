@@ -89,6 +89,7 @@ html, body {
 }
 .logo { font-size: 64px; line-height: 1; }
 h1 { font-size: 34px; margin: 0; letter-spacing: 1px; }
+#screen-prep h2 { text-align: center; margin: 0 0 4px; }
 .lead { color: var(--muted); max-width: 280px; margin: 0; }
 
 /* ---- end screen table ---- */

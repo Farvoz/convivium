@@ -108,6 +108,7 @@ function validateCard(c, idx) {
     validateMatch(c.attach.match, where + '.attach');
     if (c.attach.bonusVp !== undefined && typeof c.attach.bonusVp !== 'number') throw new Error(`${where}: attach.bonusVp number`);
     if (c.attach.bonusIfTag !== undefined && typeof c.attach.bonusIfTag !== 'string') throw new Error(`${where}: attach.bonusIfTag string`);
+    if (c.attach.choose !== undefined && typeof c.attach.choose !== 'boolean') throw new Error(`${where}: attach.choose boolean`);
   }
   if (c.sleep !== undefined && typeof c.sleep !== 'boolean') throw new Error(`${where}: sleep boolean`);
   if (c.threatWeight !== undefined) {
@@ -312,16 +313,23 @@ function runEnterActions(g, card) {
 
 function applyAttach(g, card) {
   if (!card.attach) return;
-  const owner = g.home.find((c) => c !== card && matches(c, card.attach.match));
-  if (owner) {
-    removeFromZone(g.home, card);
-    owner.attached = owner.attached || [];
-    owner.attached.push(card);
-    card.attachedTo = owner.name;
-  } else {
+  const pool = g.home.filter((c) => c !== card && matches(c, card.attach.match));
+  if (pool.length === 0) {
     removeFromZone(g.home, card);
     g.discard.push(card);
+    return;
   }
+  let owner;
+  if (card.attach.choose && pool.length > 1) {
+    const picked = g.choose(pool);
+    owner = pool.find((c) => c.name === (picked && picked.name)) || pool[0];
+  } else {
+    owner = pool[0];
+  }
+  removeFromZone(g.home, card);
+  owner.attached = owner.attached || [];
+  owner.attached.push(card);
+  card.attachedTo = owner.name;
 }
 
 function applyCardActions(g, card, phase) {

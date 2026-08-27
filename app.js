@@ -5,7 +5,7 @@
 const { cards } = globalThis;
 const {
   createGame, setup, getScore, getState, activate,
-  runTurnStart, getTopCard, resolveTop,
+  runTurnStart, getTopCard, resolveTop, deriveThreatBreakdown,
 } = globalThis.Convivium;
 
 // ---------------------------------------------------------------------------
@@ -611,12 +611,51 @@ function openDiscard() {
 function endGame() {
   setScreen('end');
   const won = game.status === 'won';
-  $('end-emoji').textContent = won ? '🎉' : '💤';
+  const s = getState(game);
+  $('end-emoji').textContent = won ? '🎉' : '🤢';
   $('end-title').textContent = won ? 'Победа!' : 'Поражение';
   $('end-score').textContent = 'Очки: ' + getScore(game);
   $('end-sub').textContent = won
     ? 'Ты дожил до конца колоды.'
     : 'Игра завершена эффектом карты — счёт сгорел.';
+
+  const table = $('end-table');
+  table.innerHTML = '';
+  if (won) {
+    renderEndTable(table, 'Очки',
+      s.home.map((c) => ({ card: c, value: c.vpEffective || 0 })),
+      getScore(game));
+  } else {
+    const rows = deriveThreatBreakdown(game).map((r) => ({ card: r.card, value: r.weight }));
+    renderEndTable(table, 'Угроза', rows, deriveThreatCount(game));
+  }
+}
+
+function renderEndTable(container, valLabel, rows, total) {
+  if (rows.length === 0) return;
+  const table = document.createElement('table');
+  table.className = 'end-table';
+  const thead = document.createElement('thead');
+  thead.innerHTML = '<tr><th>Карта</th><th class="num">' + valLabel + '</th></tr>';
+  table.appendChild(thead);
+  const tbody = document.createElement('tbody');
+  for (const r of rows) {
+    const tr = document.createElement('tr');
+    const tdC = document.createElement('td');
+    tdC.appendChild(renderCardEl(r.card, { compact: true }));
+    const tdV = document.createElement('td');
+    tdV.className = 'num';
+    tdV.textContent = r.value;
+    tr.appendChild(tdC);
+    tr.appendChild(tdV);
+    tbody.appendChild(tr);
+  }
+  const tr = document.createElement('tr');
+  tr.className = 'end-table-total';
+  tr.innerHTML = '<td>Итого</td><td class="num">' + total + '</td>';
+  tbody.appendChild(tr);
+  table.appendChild(tbody);
+  container.appendChild(table);
 }
 
 // ---------------------------------------------------------------------------

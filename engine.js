@@ -440,6 +440,22 @@ function deriveThreatCount(game) {
   return count;
 }
 
+function deriveThreatBreakdown(game) {
+  const rows = [];
+  for (const c of game.threat) {
+    if (!isThreat(c)) continue;
+    let w = 1;
+    for (const card of inPlayCards(game)) {
+      if (card.threatWeight && matches(c, card.threatWeight.match)) {
+        w = card.threatWeight.weight;
+        break;
+      }
+    }
+    rows.push({ card: c, weight: w });
+  }
+  return rows;
+}
+
 function deriveStatus(game) {
   for (const c of inPlayCards(game)) {
     if (c.loseIf && deriveThreatCount(game) >= (c.loseIf.threatsCount || 0)) return 'lost';
@@ -562,5 +578,5 @@ function shuffle(arr, rng) {
 
 globalThis.Convivium = {
   createGame, setup, takeTurn, runTurnStart, getTopCard, resolveTop, activate, getState, getScore,
-  deriveThreatCount, deriveStatus, isThreat, validateCards,
+  deriveThreatCount, deriveThreatBreakdown, deriveStatus, isThreat, validateCards,
 };

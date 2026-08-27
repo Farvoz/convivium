@@ -87,6 +87,23 @@ html, body {
 h1 { font-size: 34px; margin: 0; letter-spacing: 1px; }
 .lead { color: var(--muted); max-width: 280px; margin: 0; }
 
+/* ---- end screen table ---- */
+.end-table {
+  border-collapse: collapse;
+  width: 100%;
+  max-width: 320px;
+  font-size: 15px;
+}
+.end-table th, .end-table td {
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--line, #2a2a33);
+  text-align: left;
+}
+.end-table .num { text-align: right; font-variant-numeric: tabular-nums; }
+.end-table-total td { font-weight: 700; border-top: 2px solid var(--line, #2a2a33); border-bottom: none; }
+.end-table td:first-child { width: 1%; white-space: nowrap; }
+.end-table .card { width: 104px; margin: 0; }
+
 /* ---- prep / choice rows ---- */
 .card-row {
   display: flex;

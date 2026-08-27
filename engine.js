@@ -224,6 +224,7 @@ function setup(game, { choose } = {}) {
   runEnterActions(g, card); // стартовая карта тоже проигрывает enter-эффекты
   g.status = deriveStatus(g);
   g.turnPhase = 'idle';
+  checkAttachInvariant(g);
   return g;
 }
 
@@ -265,6 +266,7 @@ function resolveTop(game, action) {
   applyPhaseActions(g, 'turnEnd');
   g.status = deriveStatus(g);
   g.turnPhase = 'idle';
+  checkAttachInvariant(g);
   return g;
 }
 
@@ -342,6 +344,7 @@ function runAction(game, source, e) {
       const idx = zone.findIndex((c) => matches(c, e.match));
       if (idx >= 0) {
         const [target] = zone.splice(idx, 1);
+        detachAttachments(game, target);
         game.discard.push(target);
       }
       break;
@@ -361,6 +364,7 @@ function runAction(game, source, e) {
         source.accumulated.push(taken);
       }
       if (source.accumulated.length >= e.max) {
+        detachAttachments(game, source);
         removeCard(game, source);
         game.discard.push(source);
         for (const a of source.accumulated) game.discard.push(a);
@@ -372,6 +376,7 @@ function runAction(game, source, e) {
       const pool = game.threat.filter((c) => matches(c, e.filter || {}, 'threat'));
       if (pool.length) {
         const chosen = game.choose(pool);
+        detachAttachments(game, chosen);
         removeFromZone(game.threat, chosen);
         game.discard.push(chosen);
       }
@@ -407,9 +412,11 @@ function activate(game, name) {
     runAction(g, live, e);
   }
   const zone = g.home.includes(live) ? g.home : g.threat;
+  detachAttachments(g, live);
   removeFromZone(zone, live);
   g.discard.push(live);
   g.status = deriveStatus(g);
+  checkAttachInvariant(g);
   return g;
 }
 
@@ -417,9 +424,8 @@ function activate(game, name) {
 
 function deriveAsleepSet(game) {
   const set = new Set();
-  if (game.home.some((c) => c.sleep)) {
-    const p = game.home.find((c) => isPerson(c));
-    if (p) set.add(p);
+  for (const owner of game.home) {
+    if (owner.attached && owner.attached.some((a) => a.sleep)) set.add(owner);
   }
   return set;
 }
@@ -567,6 +573,33 @@ function removeCard(game, card) {
   }
 }
 
+// Аттач-карта не может лежать отдельно: уходит в сброс вместе с владельцем.
+function detachAttachments(game, card) {
+  if (!card.attached || card.attached.length === 0) return;
+  for (const a of card.attached) {
+    delete a.attachedTo;
+    game.discard.push(a);
+  }
+  card.attached = [];
+}
+
+// Инвариант: аттач-карта не бывает самостоятельной в Доме/Угрозе.
+function checkAttachInvariant(game) {
+  for (const c of game.home) {
+    if (c.attach) throw new Error(`attach card ${c.name} lies separately in home`);
+  }
+  for (const c of game.threat) {
+    if (c.attach) throw new Error(`attach card ${c.name} lies separately in threat`);
+  }
+  for (const c of game.home) {
+    if (c.attached) {
+      for (const a of c.attached) {
+        if (a.attachedTo !== c.name) throw new Error(`attached card ${a.name} has wrong attachedTo (${a.attachedTo} != ${c.name})`);
+      }
+    }
+  }
+}
+
 function shuffle(arr, rng) {
   for (let i = arr.length - 1; i > 0; i--) {
     const j = Math.floor(rng() * (i + 1));
@@ -578,5 +611,5 @@ function shuffle(arr, rng) {
 
 globalThis.Convivium = {
   createGame, setup, takeTurn, runTurnStart, getTopCard, resolveTop, activate, getState, getScore,
-  deriveThreatCount, deriveThreatBreakdown, deriveStatus, isThreat, validateCards,
+  deriveThreatCount, deriveThreatBreakdown, deriveStatus, isThreat, validateCards, checkAttachInvariant,
 };

@@ -33,6 +33,9 @@ const cards = [
     description: '',
     tags: ['guitarist', 'man'],
     vp: 1,
+    effects: [
+      { when: 'enter', op: 'replace', match: { name: 'Шура: бухой' }, in: 'home' },
+    ],
   },
   {
     name: 'Шура: бухой',
@@ -71,6 +74,9 @@ const cards = [
   {
     name: 'Паша',
     tags: ['man'],
+    effects: [
+      { when: 'enter', op: 'replace', match: { name: 'Паша: бухой' }, in: 'home' },
+    ],
   },
   {
     name: 'Плов',
@@ -104,7 +110,8 @@ const cards = [
     name: 'Кровать',
     description: "❗️ При входе в игру накрывает самого левого человека. Он теперь \"спит\"",
     sleep: true,
-    arrow: 'down'
+    arrow: 'down',
+    attach: { match: { person: true } },
   },
   {
     name: 'Палёный алкоголь',

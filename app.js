@@ -176,6 +176,13 @@ function renderCardEl(card, { compact = false, detail = false } = {}) {
     t.innerHTML = card.tags.map((tg) => `<span class="tag">${TAG_ICON[tg] || tg}</span>`).join('');
     meta.appendChild(t);
   }
+  if (card.attach) {
+    const t = document.createElement('div');
+    t.className = 'card-tags';
+    const who = card.attach.match && (card.attach.match.name || (card.attach.match.tags && card.attach.match.tags.join('/')));
+    t.innerHTML = '<span class="tag attach">📎 аттач' + (who ? ' → ' + who : '') + '</span>';
+    meta.appendChild(t);
+  }
   if (meta.childNodes.length) head.appendChild(meta);
   if (!compact && card.description) {
     const d = document.createElement('div');
@@ -616,8 +623,8 @@ function endGame() {
   $('end-title').textContent = won ? 'Победа!' : 'Поражение';
   $('end-score').textContent = 'Очки: ' + getScore(game);
   $('end-sub').textContent = won
-    ? 'Ты дожил до конца колоды.'
-    : 'Игра завершена эффектом карты — счёт сгорел.';
+    ? 'Ура, твою вечеринку запомнят надолго!'
+    : 'Лучше такое не вспоминать...';
 
   const table = $('end-table');
   table.innerHTML = '';

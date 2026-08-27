@@ -6,7 +6,7 @@ import './cards.js';
 import './engine.js';
 const { cards } = globalThis;
 const {
-  createGame, setup, takeTurn, runTurnStart, resolveTop, getScore, getState, activate, deriveThreatCount, validateCards,
+  createGame, setup, takeTurn, runTurnStart, resolveTop, getScore, getState, activate, deriveThreatCount, validateCards, checkAttachInvariant,
 } = globalThis.Convivium;
 
 // ---- helpers -------------------------------------------------------------
@@ -194,6 +194,25 @@ test('D4: Паша: бухой заменяет Пашу и замешивает
   assert.ok(s.deck.some((c) => c.arrow === 'up'), 'ожидалась замещённая Угроза в колоде');
 });
 
+test('D4b: Шура заменяет Шура: бухой, если бухой уже в игре (симметрия)', () => {
+  let game = makeGame(['Оля', 'Денис', 'Шура: бухой', 'Шура'], 'Оля');
+  game = takeTurn(game, 'buy'); // Шура: бухой -> Дом
+  game = takeTurn(game, 'buy'); // Шура заходит после бухого -> заменяет
+  const s = getState(game);
+  assert.equal(s.home.find((c) => c.name === 'Шура: бухой'), undefined);
+  assert.ok(s.home.find((c) => c.name === 'Шура'));
+});
+
+test('D4c: Паша заменяет Паша: бухой, если бухой уже в игре (симметрия)', () => {
+  // rng=0.99 -> pullReserve кладёт Угрозу ПОСЛЕ Паши, чтобы Паша гарантированно дотянулась
+  let game = makeGame(['Оля', 'Денис', 'Паша: бухой', 'Паша'], 'Оля', () => 0.99);
+  game = takeTurn(game, 'buy'); // Паша: бухой -> Дом (+замешивает Угрозу)
+  game = takeTurn(game, 'buy'); // Паша заходит после бухого -> заменяет
+  const s = getState(game);
+  assert.equal(s.home.find((c) => c.name === 'Паша: бухой'), undefined);
+  assert.ok(s.home.find((c) => c.name === 'Паша'));
+});
+
 test('D5: Хит под гитаристом даёт +1 ПО', () => {
   let game = makeGame(['Ваня', 'Оля', 'Денис', 'Хит'], 'Ваня');
   game = takeTurn(game, 'buy');
@@ -336,6 +355,8 @@ function assertInvariants(game) {
   assert.equal(Number.isInteger(score), true, 'score not integer');
   if (s.status === 'lost') assert.equal(score, 0, 'lost but score != 0');
 
+  checkAttachInvariant(game);
+
   return { realThreats: realThreats.length, total: countAllCards(s) };
 }
 
@@ -366,6 +387,24 @@ test('E2: инварианты держатся при накоплении Па
   game = takeTurn(game, 'discard');
   assertInvariants(game);
   game = takeTurn(game, 'discard');
+  assertInvariants(game);
+});
+
+test('E3: при замене владельца прикреплённая аттач-карта уходит в сброс', () => {
+  let game = makeGame(
+    ['Шура', 'Оля', 'Денис', 'Хит', 'Шура: бухой'],
+    'Шура'
+  );
+  game = takeTurn(game, 'buy'); // Хит прикрепляется к Шуре
+  const s1 = getState(game);
+  const shura = s1.home.find((c) => c.name === 'Шура');
+  assert.ok(shura.attached && shura.attached.some((c) => c.name === 'Хит'), 'Хит должен быть прикреплён к Шуре');
+  game = takeTurn(game, 'buy'); // Шура: бухой заменяет Шуру
+  const s2 = getState(game);
+  assert.equal(s2.home.find((c) => c.name === 'Шура'), undefined, 'Шура заменён');
+  assert.ok(s2.home.find((c) => c.name === 'Шура: бухой'), 'Шура: бухой в Доме');
+  assert.equal(s2.home.some((c) => c.name === 'Хит'), false, 'Хит не должен висеть в Доме');
+  assert.ok(s2.discard.some((c) => c.name === 'Хит'), 'Хит должен уйти в сброс');
   assertInvariants(game);
 });
 

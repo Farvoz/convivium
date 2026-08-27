@@ -533,6 +533,29 @@ function getScore(game) {
   return total;
 }
 
+// Вклады в итоговый счёт, точно суммирующиеся в getScore (для таблицы финала).
+function deriveScoreBreakdown(game) {
+  const inPlay = inPlayCards(game);
+  const vp = deriveVpMap(game);
+  const asleep = deriveAsleepSet(game);
+  const rows = [];
+  for (const c of inPlay) {
+    const v = vp.get(c) || 0;
+    if (v !== 0) rows.push({ card: c, value: v });
+  }
+  let bonus = 0;
+  for (const c of inPlay) {
+    for (const e of c.effects || []) {
+      if (e.op !== 'scorePerPerson') continue;
+      if (e.if && !conditionMet(game, e.if)) continue;
+      const persons = inPlay.filter((p) => isPerson(p) && !asleep.has(p)).length;
+      bonus += e.amount * persons;
+    }
+  }
+  if (bonus !== 0) rows.push({ label: 'Бонус за гостей', value: bonus });
+  return rows;
+}
+
 // --- снапшот для UI (обогащён производными, read-only) --------------------
 
 function getState(game) {
@@ -611,5 +634,5 @@ function shuffle(arr, rng) {
 
 globalThis.Convivium = {
   createGame, setup, takeTurn, runTurnStart, getTopCard, resolveTop, activate, getState, getScore,
-  deriveThreatCount, deriveThreatBreakdown, deriveStatus, isThreat, validateCards, checkAttachInvariant,
+  deriveThreatCount, deriveThreatBreakdown, deriveScoreBreakdown, deriveStatus, isThreat, validateCards, checkAttachInvariant,
 };

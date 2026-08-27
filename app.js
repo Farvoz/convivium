@@ -5,7 +5,7 @@
 const { cards } = globalThis;
 const {
   createGame, setup, getScore, getState, activate,
-  runTurnStart, getTopCard, resolveTop, deriveThreatBreakdown,
+  runTurnStart, getTopCard, resolveTop, deriveThreatBreakdown, deriveScoreBreakdown,
 } = globalThis.Convivium;
 
 // ---------------------------------------------------------------------------
@@ -244,11 +244,60 @@ function hideArrows() {
   $('btn-buy').classList.add('hidden');
 }
 
-function renderCenter(card) {
+// Рубашка карты (фон центра перед взятием).
+function renderCardBack() {
+  const el = document.createElement('div');
+  el.className = 'card card-back';
+  el.innerHTML =
+    '<div class="back-emblem">🥂</div>' +
+    '<div class="back-title">Convivium</div>';
+  return el;
+}
+
+function renderCenterBack() {
   const wrap = $('center-card');
   wrap.className = 'pop-in';
   wrap.innerHTML = '';
-  wrap.appendChild(renderCardEl(card, { detail: true }));
+  wrap.appendChild(renderCardBack());
+}
+
+// 3D-переворот рубашки → лицо верхней карты колоды.
+function flipReveal(card) {
+  const wrap = $('center-card');
+  wrap.className = '';
+  wrap.innerHTML = '';
+  const flip = document.createElement('div');
+  flip.className = 'flip';
+  flip.appendChild(renderCardBack());
+  wrap.appendChild(flip);
+
+  requestAnimationFrame(() => { flip.style.transform = 'rotateY(90deg)'; });
+  setTimeout(() => {
+    flip.innerHTML = '';
+    flip.appendChild(renderCardEl(card, { detail: true }));
+    flip.style.transition = 'none';
+    flip.style.transform = 'rotateY(-90deg)';
+    requestAnimationFrame(() => {
+      flip.style.transition = '';
+      flip.style.transform = 'rotateY(0deg)';
+    });
+  }, 270);
+  setTimeout(() => { busy = false; enableDecision(card); }, 580);
+}
+
+// Единая точка взятия карты (флип-переход) для всех ходов.
+function drawAndReveal() {
+  if (busy) return;
+  if (game.status !== 'playing') { endGame(); return; }
+  busy = true;
+  disableSwipe();
+  document.body.classList.remove('phase-activate');
+  const buy = $('btn-buy');
+  buy.querySelector('.lbl').textContent = 'Купить';
+  $('buy-e').style.display = '';
+  $('center-card').classList.remove('hidden');
+  topCard = getTopCard(game);          // peek, без мутации колоды
+  flipReveal(topCard);
 }
 
 // ---------------------------------------------------------------------------
@@ -271,7 +320,8 @@ async function choosePrep(card) {
   if (busy) return;
   busy = true;
   game = await setup(game, { choose: (opts) => opts.find((c) => c.name === card.name) || opts[0] });
-  pushLog('В Доме: ' + game.home[0].name);
+  const placed = game.home[0];
+  pushLog((placed ? 'В Доме: ' : 'Сброс: ') + card.name);
   busy = false;
   setScreen('game');
   startTurn();
@@ -286,13 +336,15 @@ async function startTurn() {
   render();
   if (game.deck.length === 0) { game.status = 'won'; endGame(); return; }
 
-  // Фаза активации 🔄 — ДО взятия новой карты (правила, шаг 1 хода).
+  // Перед взятием карты центр всегда покоится на рубашке; игрок берёт карту
+  // свайпом вправо / кнопкой «Взять» (флип-переход). Если есть 🔄-эффекты —
+  // это фаза активации (подсветка и тап по 🔄 в лентах).
   const activatable = collectActivatable();
   if (activatable.length > 0) {
-    showActivationPhase(activatable);
-    return;                            // ждём решения игрока -> proceedToDraw()
+    document.body.classList.add('phase-activate');
+    pushLog('Фаза активации: примени эффекты 🔄 или бери карту');
   }
-  proceedToDraw();
+  showTakePhase();
 }
 
 // 🔄-карты, готовые к активации (находятся в игре: Дом или Угрозы).
@@ -300,9 +352,8 @@ function collectActivatable() {
   return [...game.home, ...game.threat].filter((c) => c.cost === '🔄');
 }
 
-function showActivationPhase() {
-  document.body.classList.add('phase-activate');
-  renderActivationPlaceholder();
+function showTakePhase() {
+  renderCenterBack();
   $('center-card').classList.remove('hidden');
 
   $('btn-discard').classList.add('hidden');
@@ -310,28 +361,12 @@ function showActivationPhase() {
   buy.classList.remove('hidden');
   buy.querySelector('.lbl').textContent = 'Взять';
   $('buy-e').style.display = 'none';
-  buy.onclick = takeCard;
+  buy.onclick = drawAndReveal;
 
   enableSwipeActivation();
-  $('play-info').textContent = 'Свайп вправо → взять карту';
+  $('play-info').textContent = '';
 
-  pushLog('Фаза активации: примени эффекты 🔄 или бери карту');
   render();
-}
-
-function renderActivationPlaceholder() {
-  const wrap = $('center-card');
-  wrap.className = 'pop-in';
-  wrap.innerHTML = '';
-  const el = document.createElement('div');
-  el.className = 'card detail activation-placeholder';
-  el.innerHTML =
-    '<div class="card-img">🔄</div>' +
-    '<div class="card-body">' +
-      '<div class="card-name">Фаза активации</div>' +
-      '<div class="card-desc">Примени эффекты 🔄 или свайпни вправо</div>' +
-    '</div>';
-  wrap.appendChild(el);
 }
 
 function enableSwipeActivation() {
@@ -356,35 +391,12 @@ function enableSwipeActivation() {
     const decided = dx > 60 ? 'take' : null;
     el.style.transform = '';
     startX = null;
-    if (decided) takeCard();
+    if (decided) drawAndReveal();
   };
   el.onpointercancel = () => {
     if (autoTimer) { clearTimeout(autoTimer); autoTimer = null; }
     startX = null; el.classList.remove('dragging'); el.style.transform = '';
   };
-}
-
-async function takeCard() {
-  if (busy) return;
-  busy = true;
-  disableSwipe();
-  $('center-card').classList.add('fly-right');
-  await wait(420);
-  busy = false;
-  proceedToDraw();
-}
-
-function proceedToDraw() {
-  if (game.status !== 'playing') { endGame(); return; }
-  document.body.classList.remove('phase-activate');
-  const buy = $('btn-buy');
-  buy.querySelector('.lbl').textContent = 'Купить';
-  $('buy-e').style.display = '';
-  $('center-card').classList.remove('hidden');
-  topCard = getTopCard(game);
-  renderCenter(topCard);
-  hideArrows();
-  wait(260).then(() => enableDecision(topCard));
 }
 
 function enableDecision(card) {
@@ -629,9 +641,7 @@ function endGame() {
   const table = $('end-table');
   table.innerHTML = '';
   if (won) {
-    renderEndTable(table, 'Очки',
-      s.home.map((c) => ({ card: c, value: c.vpEffective || 0 })),
-      getScore(game));
+    renderEndTable(table, 'Очки', deriveScoreBreakdown(game), getScore(game));
   } else {
     const rows = deriveThreatBreakdown(game).map((r) => ({ card: r.card, value: r.weight }));
     renderEndTable(table, 'Угроза', rows, deriveThreatCount(game));
@@ -649,7 +659,12 @@ function renderEndTable(container, valLabel, rows, total) {
   for (const r of rows) {
     const tr = document.createElement('tr');
     const tdC = document.createElement('td');
-    tdC.appendChild(renderCardEl(r.card, { compact: true }));
+    if (r.card) {
+      tdC.appendChild(renderCardEl(r.card, { compact: true }));
+    } else {
+      tdC.textContent = r.label || '';
+      tdC.classList.add('end-row-label');
+    }
     const tdV = document.createElement('td');
     tdV.className = 'num';
     tdV.textContent = r.value;

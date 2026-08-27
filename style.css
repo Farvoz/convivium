@@ -170,7 +170,7 @@ h1 { font-size: 34px; margin: 0; letter-spacing: 1px; }
   gap: 14px;
   min-height: 0;
 }
-#center-card { width: fit-content; max-width: 80vw; touch-action: none; }
+#center-card { width: fit-content; max-width: 80vw; touch-action: none; perspective: 1100px; }
 #play-row { display: flex; align-items: center; justify-content: center; gap: 12px; }
 #center-card .card { touch-action: none; }
 
@@ -329,12 +329,42 @@ h1 { font-size: 34px; margin: 0; letter-spacing: 1px; }
 .card.activatable { cursor: pointer; outline: 2px dashed var(--accent2); }
 .card.clickable { cursor: pointer; }
 
-/* ---- фаза активации 🔄 (до взятия карты) ---- */
-.activation-placeholder { cursor: default; }
-body.phase-activate .activation-placeholder {
-  outline: 3px solid var(--accent);
-  animation: pulse 1.1s ease-in-out infinite;
+/* ---- рубашка карты (фон центра в фазе активации / перед взятием) ---- */
+.card-back {
+  width: 240px;
+  height: 300px;
+  max-width: 80vw;
+  background:
+    repeating-linear-gradient(45deg, rgba(255,255,255,0.06) 0 10px, rgba(0,0,0,0.06) 10px 20px),
+    repeating-linear-gradient(-45deg, rgba(255,255,255,0.05) 0 10px, rgba(0,0,0,0.05) 10px 20px),
+    radial-gradient(circle at 50% 38%, #9c4a6e 0%, #6e2c4e 55%, #4a1d39 100%);
+  color: #ffe9c7;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  border: 3px solid rgba(255,233,199,0.35);
+  box-shadow: inset 0 0 0 6px rgba(255,233,199,0.10), 0 10px 24px rgba(40,20,30,0.30);
 }
+.card-back .back-emblem {
+  font-size: 54px;
+  line-height: 1;
+  filter: drop-shadow(0 2px 6px rgba(0,0,0,0.35));
+}
+.card-back .back-title {
+  font-weight: 800;
+  letter-spacing: 2px;
+  font-size: 14px;
+  text-transform: uppercase;
+  opacity: 0.85;
+}
+
+/* ---- fli-контейнер для 3D-переворота рубашка → лицо ---- */
+.flip { transform-style: preserve-3d; transition: transform .26s ease; will-change: transform; transform-origin: center center; }
+.flip > .card { margin: 0; }
+
+/* ---- фаза активации 🔄 (до взятия карты) ---- */
 body.phase-activate .card.activatable {
   outline: 3px solid var(--accent);
   animation: pulse 1.1s ease-in-out infinite;

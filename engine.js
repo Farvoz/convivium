@@ -380,7 +380,6 @@ function runAction(game, source, e) {
     case 'peekReorder': {
       const n = Math.min(e.count || 0, game.deck.length);
       const top = game.deck.splice(0, n);
-      shuffle(top, game.rng);
       game.deck.unshift(...top);
       break;
     }

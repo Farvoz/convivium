@@ -295,17 +295,84 @@ function collectActivatable() {
 
 function showActivationPhase() {
   document.body.classList.add('phase-activate');
-  $('activation-bar').classList.remove('hidden');
-  $('center-card').classList.add('hidden');
-  $('btn-take').onclick = proceedToDraw;
+  renderActivationPlaceholder();
+  $('center-card').classList.remove('hidden');
+
+  $('btn-discard').classList.add('hidden');
+  const buy = $('btn-buy');
+  buy.classList.remove('hidden');
+  buy.querySelector('.lbl').textContent = 'Взять';
+  $('buy-e').style.display = 'none';
+  buy.onclick = takeCard;
+
+  enableSwipeActivation();
+  $('play-info').textContent = 'Свайп вправо → взять карту';
+
   pushLog('Фаза активации: примени эффекты 🔄 или бери карту');
   render();
+}
+
+function renderActivationPlaceholder() {
+  const wrap = $('center-card');
+  wrap.className = 'pop-in';
+  wrap.innerHTML = '';
+  const el = document.createElement('div');
+  el.className = 'card detail activation-placeholder';
+  el.innerHTML =
+    '<div class="card-img">🔄</div>' +
+    '<div class="card-body">' +
+      '<div class="card-name">Фаза активации</div>' +
+      '<div class="card-desc">Примени эффекты 🔄 или свайпни вправо</div>' +
+    '</div>';
+  wrap.appendChild(el);
+}
+
+function enableSwipeActivation() {
+  const el = $('center-card');
+  let startX = null, dx = 0;
+  el.onpointerdown = (e) => {
+    if (autoTimer) { clearTimeout(autoTimer); autoTimer = null; }
+    startX = e.clientX; dx = 0;
+    el.setPointerCapture(e.pointerId);
+    el.classList.add('dragging');
+    if (e.cancelable) e.preventDefault();
+  };
+  el.onpointermove = (e) => {
+    if (startX == null) return;
+    dx = e.clientX - startX;
+    el.style.transform = `translateX(${dx}px) rotate(${dx / 22}deg)`;
+    if (e.cancelable) e.preventDefault();
+  };
+  el.onpointerup = (e) => {
+    if (startX == null) return;
+    el.classList.remove('dragging');
+    const decided = dx > 60 ? 'take' : null;
+    el.style.transform = '';
+    startX = null;
+    if (decided) takeCard();
+  };
+  el.onpointercancel = () => {
+    if (autoTimer) { clearTimeout(autoTimer); autoTimer = null; }
+    startX = null; el.classList.remove('dragging'); el.style.transform = '';
+  };
+}
+
+async function takeCard() {
+  if (busy) return;
+  busy = true;
+  disableSwipe();
+  $('center-card').classList.add('fly-right');
+  await wait(420);
+  busy = false;
+  proceedToDraw();
 }
 
 function proceedToDraw() {
   if (game.status !== 'playing') { endGame(); return; }
   document.body.classList.remove('phase-activate');
-  $('activation-bar').classList.add('hidden');
+  const buy = $('btn-buy');
+  buy.querySelector('.lbl').textContent = 'Купить';
+  $('buy-e').style.display = '';
   $('center-card').classList.remove('hidden');
   topCard = getTopCard(game);
   renderCenter(topCard);
@@ -434,12 +501,17 @@ async function onActivate(cardName) {
   if (!card) return;
 
   const needsTarget = (card.activate || []).some((e) => e.op === 'discardTarget');
+  const needsReorder = (card.activate || []).some((e) => e.op === 'peekReorder');
   busy = true;
   let chosen = null;
   if (needsTarget) {
     chosen = await chooseFromThreats();
     if (chosen === null) { busy = false; return; }
     game.choose = () => chosen;
+  }
+  if (needsReorder) {
+    const op = (card.activate || []).find((e) => e.op === 'peekReorder');
+    await reorderDeck(op.count || 3);
   }
   game = activate(game, cardName);
   game.choose = (opts) => opts[0];
@@ -464,6 +536,39 @@ function chooseFromThreats() {
     }
     ov.classList.remove('hidden');
   });
+}
+
+async function reorderDeck(count) {
+  const n = Math.min(count || 0, game.deck.length);
+  if (n < 1) return;
+  const working = game.deck.slice(0, n);
+  const ordered = [];
+  await new Promise((resolve) => {
+    const ov = $('choice-overlay');
+    const list = $('choice-cards');
+    const render = () => {
+      list.innerHTML = '';
+      if (working.length === 0) {
+        ov.classList.add('hidden');
+        resolve();
+        return;
+      }
+      $('choice-title').textContent = 'Расставь карты: выбери верхнюю';
+      for (const c of working) {
+        const el = renderCardEl(c, { detail: true });
+        el.classList.add('clickable');
+        el.onclick = () => {
+          ordered.push(c);
+          working.splice(working.indexOf(c), 1);
+          render();
+        };
+        list.appendChild(el);
+      }
+    };
+    render();
+    ov.classList.remove('hidden');
+  });
+  game.deck.splice(0, n, ...ordered);
 }
 
 // ---------------------------------------------------------------------------

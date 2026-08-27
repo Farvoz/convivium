@@ -226,7 +226,8 @@ function updateBeerGlass(frac, count) {
 }
 
 function hideArrows() {
-  $('play-actions').classList.add('hidden');
+  $('btn-discard').classList.add('hidden');
+  $('btn-buy').classList.add('hidden');
 }
 
 function renderCenter(card) {
@@ -255,7 +256,7 @@ function goPrep() {
 async function choosePrep(card) {
   if (busy) return;
   busy = true;
-  await setup(game, { choose: (opts) => opts.find((c) => c.name === card.name) || opts[0] });
+  game = await setup(game, { choose: (opts) => opts.find((c) => c.name === card.name) || opts[0] });
   pushLog('В Доме: ' + game.home[0].name);
   busy = false;
   setScreen('game');
@@ -267,7 +268,7 @@ async function choosePrep(card) {
 // ---------------------------------------------------------------------------
 async function startTurn() {
   if (game.status !== 'playing') { endGame(); return; }
-  runTurnStart(game);                 // накопление Палёного и пр.
+  game = runTurnStart(game);                 // накопление Палёного и пр.
   render();
   if (game.deck.length === 0) { game.status = 'won'; endGame(); return; }
 
@@ -324,8 +325,12 @@ function enableDecision(card) {
 }
 
 function showActions(canBuy) {
-  updatePlayInfo(topCard);
-  $('play-actions').classList.remove('hidden');
+  $('play-info').textContent = '';
+  const buyE = $('buy-e');
+  if (buyE) buyE.innerHTML = isBuyFree(topCard)
+    ? '<span class="pos">0⚡</span>'
+    : '<span class="neg">−2⚡</span>';
+  $('btn-discard').classList.remove('hidden');
   $('btn-buy').classList.toggle('hidden', !canBuy);
   $('btn-discard').onclick = () => resolveAndAnimate(topCard, 'discard');
   $('btn-buy').onclick = () => resolveAndAnimate(topCard, 'buy');
@@ -360,7 +365,7 @@ async function resolveAndAnimate(card, action) {
   $('center-card').classList.add('fly-' + dir);
   await wait(420);
 
-  resolveTop(game, action);
+  game = resolveTop(game, action);
   logResolve(card, action);
   render();
 
@@ -429,7 +434,7 @@ async function onActivate(cardName) {
     if (chosen === null) { busy = false; return; }
     game.choose = () => chosen;
   }
-  activate(game, cardName);
+  game = activate(game, cardName);
   game.choose = (opts) => opts[0];
   pushLog('Активировано: ' + cardName);
   render();

@@ -2,19 +2,18 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
 // cards.js / engine.js выставляют данные и API через globalThis
-// (работают и как классические скрипты в браузере, и в Node ESM при импорте).
 import './cards.js';
 import './engine.js';
 const { cards } = globalThis;
-const { createGame, setup, takeTurn, getScore, getState, activate } = globalThis.Convivium;
+const {
+  createGame, setup, takeTurn, runTurnStart, resolveTop, getScore, getState, activate, deriveThreatCount, validateCards,
+} = globalThis.Convivium;
 
 // ---- helpers -------------------------------------------------------------
 
 const byName = Object.fromEntries(cards.map((c) => [c.name, c]));
 
-// Клонируем карту, чтобы каждый экземпляр в колоде был уникальной ссылкой
-// (нужно для проверки непересечения зон по ссылке). Эффекты клонируем глубоко,
-// чтобы мутации движка не попадали на шаблоны cards.js.
+// Клонируем карту, чтобы каждый экземпляр в колоде был уникальной ссылкой.
 function cloneCard(name) {
   const c = byName[name];
   const clone = { ...c };
@@ -32,15 +31,14 @@ function makeGame(order, choose, rng) {
   const chooseFn = typeof choose === 'function'
     ? choose
     : (opts) => opts.find((c) => c.name === choose) || opts[0];
-  setup(game, { choose: chooseFn });
-  return game;
+  return setup(game, { choose: chooseFn });
 }
 
 // Снять карты, пока игра не закончится (для тестов победы/поражения).
 function runToEnd(game, action = 'buy') {
   let guard = 0;
   while (game.status === 'playing' && guard++ < 1000) {
-    takeTurn(game, action);
+    game = takeTurn(game, action);
   }
   return game;
 }
@@ -48,12 +46,12 @@ function runToEnd(game, action = 'buy') {
 // ---- A. Подготовка / setup ----------------------------------------------
 
 test('A1: после подготовки энергия равна 2', () => {
-  const game = makeGame(['Ваня', 'Оля', 'Денис', 'Комната 402'], 'Ваня');
+  let game = makeGame(['Ваня', 'Оля', 'Денис', 'Комната 402'], 'Ваня');
   assert.equal(getState(game).energy, 2);
 });
 
 test('A2: ровно 1 из 3 открытых карт в Доме, остальные 2 в сбросе', () => {
-  const game = makeGame(['Ваня', 'Оля', 'Денис', 'Комната 402'], 'Ваня');
+  let game = makeGame(['Ваня', 'Оля', 'Денис', 'Комната 402'], 'Ваня');
   const s = getState(game);
   assert.equal(s.home.length, 1);
   assert.equal(s.home[0].name, 'Ваня');
@@ -63,16 +61,16 @@ test('A2: ровно 1 из 3 открытых карт в Доме, остал�
 });
 
 test('A3: свободная карта в Дом не тратит энергию', () => {
-  const game = makeGame(['Ваня', 'Оля', 'Денис', 'Комната 402'], 'Ваня');
+  let game = makeGame(['Ваня', 'Оля', 'Денис', 'Комната 402'], 'Ваня');
   assert.equal(getState(game).energy, 2);
 });
 
 // ---- B. Общий флоу хода --------------------------------------------------
 
 test('B1: сброс обычной карты даёт +1 энергия и кладёт в сброс', () => {
-  const game = makeGame(['Ваня', 'Оля', 'Денис', 'Комната 402'], 'Ваня');
+  let game = makeGame(['Ваня', 'Оля', 'Денис', 'Комната 402'], 'Ваня');
   const before = getState(game).energy;
-  takeTurn(game, 'discard'); // Комната 402
+  game = takeTurn(game, 'discard');
   const s = getState(game);
   assert.equal(s.energy, before + 1);
   assert.equal(s.discard.some((c) => c.name === 'Комната 402'), true);
@@ -80,34 +78,34 @@ test('B1: сброс обычной карты даёт +1 энергия и к�
 });
 
 test('B2: покупка тратит 2 энергии и кладёт в Дом', () => {
-  const game = makeGame(['Ваня', 'Оля', 'Денис', 'Тост'], 'Ваня');
-  const before = getState(game).energy; // 2
-  takeTurn(game, 'buy'); // Тост
+  let game = makeGame(['Ваня', 'Оля', 'Денис', 'Тост'], 'Ваня');
+  const before = getState(game).energy;
+  game = takeTurn(game, 'buy');
   const s = getState(game);
   assert.equal(s.energy, before - 2);
   assert.equal(s.home.some((c) => c.name === 'Тост'), true);
 });
 
 test('B3: при энергии < 2 покупка недоступна — выбрасывается ошибка', () => {
-  const game = makeGame(['Ваня', 'Оля', 'Денис', 'Тост', 'Комната 402'], 'Ваня');
-  takeTurn(game, 'buy'); // Тост, energy 2 -> 0
+  let game = makeGame(['Ваня', 'Оля', 'Денис', 'Тост', 'Комната 402'], 'Ваня');
+  game = takeTurn(game, 'buy');
   assert.equal(getState(game).energy, 0);
-  assert.throws(() => takeTurn(game, 'buy'), /energy/i); // Комната 402
+  assert.throws(() => takeTurn(game, 'buy'), /energy/i);
 });
 
 test('B4: карта со стрелкой вверх (Угроза) уходит в Зону Угрозы без траты энергии', () => {
-  const game = makeGame(['Ваня', 'Оля', 'Денис', 'Шум'], 'Ваня');
+  let game = makeGame(['Ваня', 'Оля', 'Денис', 'Шум'], 'Ваня');
   const before = getState(game).energy;
-  takeTurn(game, 'buy'); // действие игнорируется у стрелки
+  game = takeTurn(game, 'buy');
   const s = getState(game);
-  assert.equal(s.energy, before); // энергия не изменилась
+  assert.equal(s.energy, before);
   assert.equal(s.threat.some((c) => c.name === 'Шум'), true);
 });
 
 test('B5: карта со стрелкой вниз (Авто) уходит в Дом автоматически', () => {
-  const game = makeGame(['Ваня', 'Оля', 'Денис', 'Шура: бухой'], 'Ваня');
+  let game = makeGame(['Ваня', 'Оля', 'Денис', 'Шура: бухой'], 'Ваня');
   const before = getState(game).energy;
-  takeTurn(game, 'buy'); // действие игнорируется у стрелки
+  game = takeTurn(game, 'buy');
   const s = getState(game);
   assert.equal(s.energy, before);
   assert.equal(s.home.some((c) => c.name === 'Шура: бухой'), true);
@@ -116,118 +114,98 @@ test('B5: карта со стрелкой вниз (Авто) уходит в �
 // ---- C. Конец игры -------------------------------------------------------
 
 test('C1: пустая колода — победа, счёт = сумма ПО Дом + Угрозы', () => {
-  // prep: Ваня(Дом, vp1), Оля/Денис в сброс.
-  // Далее: День рождения!(vp2, угроза), Тост(vp1, +1 т.к. ДР в игре =>2, Дом).
-  const game = makeGame(
+  let game = makeGame(
     ['Ваня', 'Оля', 'Денис', 'День рождения!', 'Тост'],
     'Ваня'
   );
-  runToEnd(game, 'buy');
+  game = runToEnd(game, 'buy');
   const s = getState(game);
   assert.equal(s.status, 'won');
-  // Ваня 1 + Тост 2(1+1) + День рождения! 2 = 5
   assert.equal(getScore(game), 5);
 });
 
 test('C2: Обход + 3 Угрозы в конце хода — поражение, счёт 0', () => {
-  // 3 угрозы + Обход в зоне угроз -> loss.
-  const game = makeGame(
+  let game = makeGame(
     ['Ваня', 'Оля', 'Денис', 'Шум', 'Порванная струна', 'Шум', 'Обход', 'Шум'],
     'Ваня'
   );
-  runToEnd(game, 'discard'); // все обычные/стрелки уходят; в итоге 3 Угрозы + Обход
+  game = runToEnd(game, 'discard');
   const s = getState(game);
-  // Угрозы: Шум, Порванная струна, Шум, Обход(не угроза), Шум => 3 Угрозы
   assert.equal(s.status, 'lost');
   assert.equal(getScore(game), 0);
 });
 
 test('C3: Обход сам не считается Угрозой для счётчика', () => {
-  // 2 Угрозы + Обход => не проигрыш (меньше 3).
-  const game = makeGame(
+  let game = makeGame(
     ['Ваня', 'Оля', 'Денис', 'Шум', 'Обход', 'Шум'],
     'Ваня'
   );
-  runToEnd(game, 'discard');
+  game = runToEnd(game, 'discard');
   const s = getState(game);
-  const threats = s.threat.filter((c) => c.threat !== false);
-  assert.equal(threats.length, 2);
-  assert.notEqual(s.status, 'lost'); // не поражение по Обходу
+  assert.equal(s.threat.filter((c) => c.arrow === 'up' && c.threat !== false).length, 2);
+  assert.notEqual(s.status, 'lost');
 });
 
 // ---- D. Ключевые эффекты карт -------------------------------------------
 
-test('D1: Кровать накрывает самого левого человека -> он "спит" (0 ПО, не человек)', () => {
-  // prep choose Ваня (man/guitarist, vp1) -> home. Затем Кровать.
-  const game = makeGame(['Ваня', 'Оля', 'Денис', 'Кровать'], 'Ваня');
-  takeTurn(game, 'buy'); // Кровать входит в игру, накрывает Ваню
+test('D1: Кровать накрывает самого левого человека -> он "спит" (0 ПО)', () => {
+  let game = makeGame(['Ваня', 'Оля', 'Денис', 'Кровать'], 'Ваня');
+  game = takeTurn(game, 'buy');
   const s = getState(game);
   const vanya = s.home.find((c) => c.name === 'Ваня');
   assert.equal(vanya.asleep, true);
-  // Спящий не даёт ПО: счёт по Ване = 0 (только выигрышный подсчёт проверим отдельно).
-  // Большая вечеринка не считает спящего.
   assert.equal(getScore(game), 0);
 });
 
 test('D2: Палёный алкоголь копит по 1 карте с верха каждый ход, при 3 сбрасывает себя и кучу', () => {
-  // Порядок (верх = начало): [Ваня, Оля, Денис, Палёный, A, B, C, D, E]
-  // prep берёт первые 3 (Ваня,Оля,Денис). В колоде остаётся Палёный на вершине.
-  // turn1: Палёный в Зону Угрозы. turn2/3/4 накапливает A,C,E (3 шт) -> сброс себя+кучи.
-  const game = makeGame(
+  let game = makeGame(
     ['Ваня', 'Оля', 'Денис', 'Палёный алкоголь', 'Комната 402', 'Тост', 'Оля', 'Денис', '3-й сосед'],
     'Ваня'
   );
-  takeTurn(game, 'discard'); // Палёный алкоголь -> Зона Угрозы
-  takeTurn(game, 'discard'); // turnStart: 1-я накопленная
-  takeTurn(game, 'discard'); // 2-я накопленная
-  takeTurn(game, 'discard'); // 3-я -> достигает 3 -> сброс себя + кучи
+  game = takeTurn(game, 'discard');
+  game = takeTurn(game, 'discard');
+  game = takeTurn(game, 'discard');
+  game = takeTurn(game, 'discard');
   const s = getState(game);
   const burnt = s.threat.find((c) => c.name === 'Палёный алкоголь');
-  assert.equal(burnt, undefined); // сам сброшен
+  assert.equal(burnt, undefined);
   const discardedNames = s.discard.map((c) => c.name);
-  assert.equal(discardedNames.includes('Оля'), true); // одна из накопленных (C)
-  assert.equal(discardedNames.includes('Тост'), true); // взятая (B)
-  assert.equal(discardedNames.includes('Денис'), true); // взятая (D)
+  assert.equal(discardedNames.includes('Оля'), true);
+  assert.equal(discardedNames.includes('Тост'), true);
+  assert.equal(discardedNames.includes('Денис'), true);
 });
 
-test('D3: Шура: бухой заменяет Шуру и делает Шум = 2 Угрозы', () => {
-  // prep choose Шура -> home. Затем Шура: бухой (arrow down) заменяет.
-  const game = makeGame(['Шура', 'Оля', 'Денис', 'Шура: бухой'], 'Шура');
-  const s0 = getState(game);
-  assert.ok(s0.home.find((c) => c.name === 'Шура'));
-  takeTurn(game, 'buy'); // Шура: бухой входит, заменяет Шуру
+test('D3: Шура: бухой заменяет Шуру и делает Шум = 2 Угрозы (threatWeight)', () => {
+  let game = makeGame(['Шура', 'Оля', 'Денис', 'Шум', 'Шура: бухой'], 'Шура');
+  game = takeTurn(game, 'discard'); // Шум -> Угроза
+  game = takeTurn(game, 'buy'); // Шура: бухой заменяет Шуру
   const s = getState(game);
   assert.equal(s.home.find((c) => c.name === 'Шура'), undefined);
   assert.ok(s.home.find((c) => c.name === 'Шура: бухой'));
-  // Флаг "Шум = 2 Угрозы" должен быть установлен в состоянии.
-  assert.equal(s.flags.shumCountsAsTwoThreats, true);
+  assert.equal(deriveThreatCount(game), 2); // Шум весит 2 из-за Шура: бухой
 });
 
 test('D4: Паша: бухой заменяет Пашу и замешивает 1 Угрозу взакрытую', () => {
-  const game = makeGame(['Паша', 'Оля', 'Денис', 'Паша: бухой'], 'Паша');
-  takeTurn(game, 'buy'); // Паша: бухой заменяет Пашу, +1 Угроза в колоду
+  let game = makeGame(['Паша', 'Оля', 'Денис', 'Паша: бухой'], 'Паша');
+  game = takeTurn(game, 'buy');
   const s = getState(game);
   assert.equal(s.home.find((c) => c.name === 'Паша'), undefined);
   assert.ok(s.home.find((c) => c.name === 'Паша: бухой'));
-  // взятие съело 1 карту колоды, pullReserve добавило 1 Угрозу — в колоде появилась карта-Угроза
   assert.ok(s.deck.some((c) => c.arrow === 'up'), 'ожидалась замещённая Угроза в колоде');
 });
 
 test('D5: Хит под гитаристом даёт +1 ПО', () => {
-  // prep choose Ваня (guitarist). Затем Хит (attach) подкладывается под гитариста.
-  const game = makeGame(['Ваня', 'Оля', 'Денис', 'Хит'], 'Ваня');
-  takeTurn(game, 'buy'); // Хит аттачится под Ваню
+  let game = makeGame(['Ваня', 'Оля', 'Денис', 'Хит'], 'Ваня');
+  game = takeTurn(game, 'buy');
   const s = getState(game);
   const vanya = s.home.find((c) => c.name === 'Ваня');
   assert.ok(vanya.attached && vanya.attached.some((c) => c.name === 'Хит'));
-  // Ваня vp1 + Хит база 1 + бонус под гитаристом 1 = 3
   assert.equal(getScore(game), 3);
 });
 
 test('D5b: Хит под не-гитаристом даёт только базу 1 ПО', () => {
-  // Паша (man, vp0) в Доме. Хит аттачится под Пашу, бонуса нет.
-  const game = makeGame(['Паша', 'Оля', 'Денис', 'Хит'], 'Паша');
-  takeTurn(game, 'buy');
+  let game = makeGame(['Паша', 'Оля', 'Денис', 'Хит'], 'Паша');
+  game = takeTurn(game, 'buy');
   const s = getState(game);
   const pasha = s.home.find((c) => c.name === 'Паша');
   assert.ok(pasha.attached && pasha.attached.some((c) => c.name === 'Хит'));
@@ -235,80 +213,55 @@ test('D5b: Хит под не-гитаристом даёт только баз�
 });
 
 test('D5c: Хит без человека в Доме уходит в сброс', () => {
-  // Без человека Хит некуда подложить -> сброс, очки не даёт.
-  const game = makeGame(['Плов', 'Оля', 'Денис', 'Хит'], 'Плов');
-  takeTurn(game, 'buy');
+  let game = makeGame(['Плов', 'Оля', 'Денис', 'Хит'], 'Плов');
+  game = takeTurn(game, 'buy');
   const s = getState(game);
   assert.ok(!s.home.some((c) => c.name === 'Хит'));
   assert.ok(s.discard.some((c) => c.name === 'Хит'));
-  assert.equal(getScore(game), 1); // Плов vp1, Хит в сбросе
+  assert.equal(getScore(game), 1);
 });
 
 test('D6: Порванная струна обнуляет ПО гитаристов', () => {
-  const game = makeGame(['Ваня', 'Оля', 'Денис', 'Порванная струна'], 'Ваня');
-  takeTurn(game, 'discard'); // Порванная струна -> Зона Угрозы
-  // Ваня (гитарист) теперь 0 ПО
+  let game = makeGame(['Ваня', 'Оля', 'Денис', 'Порванная струна'], 'Ваня');
+  game = takeTurn(game, 'discard');
   assert.equal(getScore(game), 0);
 });
 
 test('D7: Натянуть струну (🔄) сбрасывает Порванную струну при наличии гитариста', () => {
-  // prep: Ваня(guitarist) в Дом. Затем Порванная струна (угроза), затем Натянуть струну.
-  const game = makeGame(
-    ['Ваня', 'Оля', 'Денис', 'Порванная струна', 'Натянуть струну'],
+  let game = makeGame(
+    ['Ваня', 'Оля', 'Денис', 'Порванная струна', 'Натянуть струну', 'Комната 402'],
     'Ваня'
   );
-  takeTurn(game, 'discard'); // Порванная струна в угрозе
-  takeTurn(game, 'discard'); // Натянуть струну в сброс (открыта), готова к активации
-  activate(game, 'Натянуть струну'); // 🔄: сбросить Порванную струну (гитарист есть)
+  game = takeTurn(game, 'discard');
+  game = takeTurn(game, 'buy');
+  game = activate(game, 'Натянуть струну');
   const s = getState(game);
   assert.equal(s.threat.find((c) => c.name === 'Порванная струна'), undefined);
 });
 
 test('D8: Большая вечеринка даёт +1 ПО за каждого человека в игре (в конце)', () => {
-  // prep choose Ваня (man). Далее Оля(woman), Денис(man) покупаем -> 3 человека.
-  const game = makeGame(
-    ['Ваня', 'Оля', 'Денис', 'Оля', 'Денис', 'Большая вечеринка'],
-    'Ваня'
-  );
-  // колода после prep: [Оля, Денис, Большая вечеринка] (top=БВ)
-  // Докупим людей в Дом, затем Большая вечеринка.
-  // energy=2 -> купить Олю(-2). Денис не купить -> сброс.
-  takeTurn(game, 'buy'); // Оля -> home (woman)
-  takeTurn(game, 'discard'); // Денис -> discard (+1 energy)
-  // energy=1, покупка БВ недоступна -> сброс. Но БВ должна попасть в Дом для эффекта.
-  // Чтобы проверить эффект, дадим энергию через ещё один сброс: добавим карту.
-  // (упрощаем: перестроим колоду с запасом энергии)
-  // --- альтернативный сценарий ниже (D8b)
-  assert.ok(true); // placeholder, реальная проверка в D8b
-});
-
-test('D8b: Большая вечеринка +1 ПО за человека при достаточной энергии', () => {
-  const game = makeGame(
+  let game = makeGame(
     ['Ваня', 'Оля', 'Денис', 'Комната 402', 'Оля', 'Денис', 'Большая вечеринка'],
     'Ваня'
   );
-  // prep: энергия 2, home=[Ваня]. колода: [Комната 402, Оля, Денис, Большая вечеринка]
-  takeTurn(game, 'discard'); // Комната 402 -> +1 energy (3)
-  takeTurn(game, 'buy'); // Оля -> home (woman), -2 (1)
-  takeTurn(game, 'discard'); // Денис -> +1 (2)
-  takeTurn(game, 'buy'); // Большая вечеринка -> home, -2 (0)
-  // люди в игре: Ваня(man), Оля(woman) = 2 человека => +2 ПО
-  // Ваня vp1 + Оля 0 + Большая вечеринка 0 + бонус 2 = 3
+  game = takeTurn(game, 'discard');
+  game = takeTurn(game, 'buy');
+  game = takeTurn(game, 'discard');
+  game = takeTurn(game, 'buy');
   assert.equal(getScore(game), 3);
 });
 
-// ---- D9. Активация 🔄 сбрасывает саму карту-источник (цена сброса) -------
+// ---- D9. Активация 🔄 ----------------------------------------------------
 
 test('D9: активация 🔄 из Дома применяет эффект и уходит в сброс без энергии', () => {
-  // prep: Ваня(guitarist) в Дом. Затем Порванная струна (угроза), затем Натянуть струну (купим в Дом).
-  const game = makeGame(
-    ['Ваня', 'Оля', 'Денис', 'Порванная струна', 'Натянуть струну'],
+  let game = makeGame(
+    ['Ваня', 'Оля', 'Денис', 'Порванная струна', 'Натянуть струну', 'Комната 402'],
     'Ваня'
   );
-  takeTurn(game, 'discard'); // Порванная струна -> Зона Угрозы
-  takeTurn(game, 'buy');     // Натянуть струну -> Дом (энергия 2 -> 0)
+  game = takeTurn(game, 'discard');
+  game = takeTurn(game, 'buy');
   const before = getState(game).energy;
-  activate(game, 'Натянуть струну'); // 🔄: сбросить Порванную струну + сама уходит в сброс
+  game = activate(game, 'Натянуть струну');
   const s = getState(game);
   assert.equal(s.threat.find((c) => c.name === 'Порванная струна'), undefined, 'Порванная струна не сброшена');
   assert.equal(s.home.find((c) => c.name === 'Натянуть струну'), undefined, 'карта-источник осталась в Доме');
@@ -316,32 +269,34 @@ test('D9: активация 🔄 из Дома применяет эффект 
   assert.equal(s.energy, before, 'активация дала энергию (не должна)');
 });
 
-test('D9b: повторная активация 🔄 из сброса не возвращает карту в игру', () => {
-  const game = makeGame(
-    ['Ваня', 'Оля', 'Денис', 'Порванная струна', 'Натянуть струну'],
+test('D9b: 🔄 из сброса НЕ работает (карта вне игры -> no-op)', () => {
+  let game = makeGame(
+    ['Ваня', 'Оля', 'Денис', 'Порванная струна', 'Натянуть струну', 'Комната 402'],
     'Ваня'
   );
-  takeTurn(game, 'discard');
-  takeTurn(game, 'buy');
-  activate(game, 'Натянуть струну'); // из Дома -> сброс
-  const inPlayBefore = [...getState(game).home, ...getState(game).threat].length;
-  activate(game, 'Натянуть струну'); // из сброса: эффект без цели, карта остаётся в сбросе
-  const s = getState(game);
-  assert.equal(s.home.find((c) => c.name === 'Натянуть струну'), undefined);
-  assert.ok(s.discard.some((c) => c.name === 'Натянуть струну'));
-  assert.equal([...s.home, ...s.threat].length, inPlayBefore, 'число карт в игре изменилось при повторе');
+  game = takeTurn(game, 'discard');
+  game = takeTurn(game, 'buy');
+  const beforeThreat = getState(game).threat.length;
+  game = activate(game, 'Натянуть струну'); // из Дома -> сброс (Порванная уходит)
+  const afterFirst = getState(game);
+  assert.equal(afterFirst.threat.find((c) => c.name === 'Порванная струна'), undefined);
+  // повторная активация — карта уже в сбросе, не в игре -> не должна ничего сделать
+  const snapshot = JSON.stringify(getState(game).threat.map((c) => c.name));
+  game = activate(game, 'Натянуть струну');
+  const afterSecond = getState(game);
+  assert.equal(afterSecond.threat.find((c) => c.name === 'Натянуть струну'), undefined);
+  assert.equal(JSON.stringify(afterSecond.threat.map((c) => c.name)), snapshot, 'повтор из сброса изменил состояние');
+  assert.equal(afterSecond.threat.length, 0); // Порванная уже сброшена, новых нет
+  void beforeThreat;
 });
 
 // ---- E. Инварианты -------------------------------------------------------
 
-const ALL_NAMES = new Set(cards.map((c) => c.name));
-
-function topLevelCards(state) {
-  return [...state.deck, ...state.home, ...state.threat, ...state.discard];
+function topLevelCards(game) {
+  return [...game.deck, ...game.home, ...game.threat, ...game.discard];
 }
 
-// Рекурсивный подсчёт всех карт (включая вложенные attach/accumulated).
-function countAllCards(state) {
+function countAllCards(game) {
   let n = 0;
   const walk = (zone) => {
     for (const c of zone) {
@@ -350,48 +305,33 @@ function countAllCards(state) {
       if (c.accumulated) walk(c.accumulated);
     }
   };
-  walk(state.deck);
-  walk(state.home);
-  walk(state.threat);
-  walk(state.discard);
+  walk(game.deck);
+  walk(game.home);
+  walk(game.threat);
+  walk(game.discard);
   return n;
 }
 
-// Проверяет свойства, верные при ЛЮБЫХ ходах. Падает при нарушении.
 function assertInvariants(game) {
-  const s = getState(game);
-
-  // Энергия — целое неотрицательное.
+  const s = game;
   assert.equal(Number.isInteger(s.energy), true, 'energy not integer');
   assert.ok(s.energy >= 0, `energy negative: ${s.energy}`);
+  assert.ok(['playing', 'won', 'lost'].includes(s.status), `bad status: ${s.status}`);
 
-  // Статус валиден.
-  assert.ok(
-    ['playing', 'won', 'lost'].includes(s.status),
-    `bad status: ${s.status}`
-  );
-
-  // Все карты в зонах — известны.
+  const ALL = new Set(cards.map((c) => c.name));
   for (const c of topLevelCards(s)) {
-    assert.ok(ALL_NAMES.has(c.name), `unknown card in play: ${c.name}`);
+    assert.ok(ALL.has(c.name), `unknown card in play: ${c.name}`);
   }
 
-  // Зоны не пересекаются по ссылке (одна карта не в двух местах сразу).
   const seen = new Set();
   for (const c of topLevelCards(s)) {
     assert.ok(!seen.has(c), `card in two zones: ${c.name}`);
     seen.add(c);
   }
 
-  // Счётчик Угроз: карта «Обход» НЕ считается Угрозой.
-  const realThreats = s.threat.filter((c) => c.threat === true);
-  assert.ok(
-    !s.threat.some((c) => c.name === 'Обход' && c.threat === true),
-    'Обход учтён как Угроза'
-  );
+  const realThreats = s.threat.filter((c) => c.arrow === 'up' && c.threat !== false);
+  assert.ok(!s.threat.some((c) => c.name === 'Обход' && c.arrow === 'up' && c.threat !== false), 'Обход учтён как Угроза');
 
-  // Поражение => счёт 0; счёт конечен и целый (может быть отрицательным —
-  // сумма ПО карт, включая отрицательные, по правилам не ограничена снизу).
   const score = getScore(game);
   assert.equal(Number.isInteger(score), true, 'score not integer');
   if (s.status === 'lost') assert.equal(score, 0, 'lost but score != 0');
@@ -400,7 +340,7 @@ function assertInvariants(game) {
 }
 
 test('E1: инварианты держатся в ручной партии (победа)', () => {
-  const game = makeGame(
+  let game = makeGame(
     ['Ваня', 'Оля', 'Денис', 'День рождения!', 'Тост', 'Комната 402'],
     'Ваня'
   );
@@ -408,30 +348,29 @@ test('E1: инварианты держатся в ручной партии (п
   let guard = 0;
   while (game.status === 'playing' && guard++ < 100) {
     const action = getState(game).energy >= 2 ? 'buy' : 'discard';
-    takeTurn(game, action);
+    game = takeTurn(game, action);
     assertInvariants(game);
   }
   assert.equal(game.status, 'won');
 });
 
 test('E2: инварианты держатся при накоплении Палёного алкоголя', () => {
-  const game = makeGame(
+  let game = makeGame(
     ['Ваня', 'Оля', 'Денис', 'Палёный алкоголь', 'Комната 402', 'Тост', 'Денис', 'Оля'],
     'Ваня'
   );
-  takeTurn(game, 'discard'); // Палёный алкоголь -> накопление
+  game = takeTurn(game, 'discard');
   assertInvariants(game);
-  takeTurn(game, 'discard');
+  game = takeTurn(game, 'discard');
   assertInvariants(game);
-  takeTurn(game, 'discard');
+  game = takeTurn(game, 'discard');
   assertInvariants(game);
-  takeTurn(game, 'discard'); // достигает 3 -> сброс себя + кучи
+  game = takeTurn(game, 'discard');
   assertInvariants(game);
 });
 
 // ---- F. Property-based / fuzz --------------------------------------------
 
-// Простой детерминированный ГПСЧ (LCG), чтобы падения воспроизводились по seed.
 function lcg(seed) {
   let s = seed >>> 0;
   return () => {
@@ -442,8 +381,6 @@ function lcg(seed) {
 
 const CARD_POOL = cards.map((c) => c.name);
 
-// Один случайный прогон: случайная колода + случайные ДОПУСТИМЫЕ действия.
-// Возвращает финальное состояние для проверки детерминизма.
 function simulate(seed) {
   const rng = lcg(seed);
   const n = 20 + Math.floor(rng() * 25);
@@ -453,14 +390,13 @@ function simulate(seed) {
   }
   const top3 = order.slice(0, 3);
   const choose = top3[Math.floor(rng() * 3)];
-  const game = makeGame(order, choose, rng);
+  let game = makeGame(order, choose, rng);
   assertInvariants(game);
   let turns = 0;
   while (game.status === 'playing' && turns < 20000) {
     const energy = getState(game).energy;
-    // Допустимое действие: покупка только при energy>=2, иначе сброс.
     const action = energy >= 2 ? (rng() < 0.6 ? 'buy' : 'discard') : 'discard';
-    takeTurn(game, action);
+    game = takeTurn(game, action);
     assertInvariants(game);
     turns++;
   }
@@ -483,20 +419,16 @@ test('G1: детерминизм — тот же seed даёт идентичн�
   assert.deepEqual(a, b);
 });
 
-test('G2: разные seed обычно дают разные партии (не зациклено на константе)', () => {
+test('G2: разные seed обычно дают разные партии', () => {
   const results = new Set();
   for (let seed = 1000; seed < 1010; seed++) {
     const r = simulate(seed);
     results.add(`${r.status}:${r.score}:${r.turns}`);
   }
-  // Хотя бы 2 различных исхода среди 10 — проверка, что ГПСЧ реально варьирует.
   assert.ok(results.size >= 2, 'fuzz выдаёт одинаковые партии независимо от seed');
 });
 
-// ---- H. Golden-сценарии по уникальным эффектам -------------------------
-// Таблица: каждый сценарий изолирует один эффект/поведение и проверяет
-// детерминированный исход. Дублирует часть D, но здесь это каноническая
-// спецификация поведения карт (per-effect regression).
+// ---- H. Golden-сценарии --------------------------------------------------
 
 const GOLDEN = [
   {
@@ -506,7 +438,7 @@ const GOLDEN = [
     expect: (g) => {
       const s = getState(g);
       assert.ok(s.threat.some((c) => c.name === 'Шум'));
-      assert.equal(s.energy, 2); // стрелка не меняет энергию
+      assert.equal(s.energy, 2);
     },
   },
   {
@@ -530,12 +462,12 @@ const GOLDEN = [
     },
   },
   {
-    id: 'setFlag+endGameIf', card: 'Шура: бухой + Обход',
+    id: 'threatWeight+loseIf', card: 'Шура: бухой + Обход',
     order: ['Ваня', 'Оля', 'Денис', 'Шум', 'Шура: бухой', 'Шум', 'Обход'], choose: 'Ваня',
-    run: (g) => { while (g.status === 'playing') takeTurn(g, 'discard'); },
+    run: (g) => { while (g.status === 'playing') g = takeTurn(g, 'discard'); return g; },
     expect: (g) => {
       const s = getState(g);
-      assert.equal(s.flags.shumCountsAsTwoThreats, true);
+      assert.equal(deriveThreatCount(g), 4); // 2 Шум по весу 2
       assert.equal(s.status, 'lost');
       assert.equal(getScore(g), 0);
     },
@@ -565,7 +497,7 @@ const GOLDEN = [
     id: 'accumulate', card: 'Палёный алкоголь',
     order: ['Ваня', 'Оля', 'Денис', 'Палёный алкоголь', 'Комната 402', 'Тост', 'Оля', 'Денис', '3-й сосед'],
     choose: 'Ваня',
-    run: (g) => { for (let i = 0; i < 4; i++) takeTurn(g, 'discard'); },
+    run: (g) => { for (let i = 0; i < 4; i++) g = takeTurn(g, 'discard'); return g; },
     expect: (g) => {
       const s = getState(g);
       assert.equal(s.threat.find((c) => c.name === 'Палёный алкоголь'), undefined);
@@ -584,18 +516,29 @@ const GOLDEN = [
     },
   },
   {
+    id: 'modifyVp+attach (BUG2)', card: 'Порванная струна + Хит',
+    order: ['Ваня', 'Оля', 'Денис', 'Хит', 'Порванная струна'], choose: 'Ваня',
+    run: (g) => { g = takeTurn(g, 'buy'); g = takeTurn(g, 'discard'); return g; },
+    expect: (g) => {
+      const s = getState(g);
+      const v = s.home.find((c) => c.name === 'Ваня');
+      // гитарист обнулён, но прикреплённый Хит (vp1 + bonus1) сохраняется
+      assert.equal(v.vpEffective, 2);
+      assert.equal(getScore(g), 2);
+    },
+  },
+  {
     id: 'addVp', card: 'Конфликт',
     order: ['Паша', 'Оля', 'Денис', 'Паша: бухой', 'Комната 402', 'Шура', 'Конфликт'],
     choose: 'Паша',
-    run: (g) => {
-      takeTurn(g, 'buy'); // Паша: бухой (замешивает +1 Угрозу в колоду)
-      // pullReserve сбивает порядок взятия — гоним до конца: Конфликт (arrow-down)
-      // гарантированно войдёт в Дом при взятии.
-      while (g.status === 'playing') {
-        const a = getState(g).energy >= 2 ? 'buy' : 'discard';
-        takeTurn(g, a);
-      }
-    },
+      run: (g) => {
+        g = takeTurn(g, 'buy');
+        while (g.status === 'playing') {
+          const a = getState(g).energy >= 2 ? 'buy' : 'discard';
+          g = takeTurn(g, a);
+        }
+        return g;
+      },
     expect: (g) => {
       const pb = getState(g).home.find((c) => c.name === 'Паша: бухой');
       assert.equal(pb.vpEffective, -1);
@@ -607,8 +550,9 @@ const GOLDEN = [
     run: (g) => {
       while (g.status === 'playing') {
         const a = getState(g).energy >= 2 ? 'buy' : 'discard';
-        takeTurn(g, a);
+        g = takeTurn(g, a);
       }
+      return g;
     },
     expect: (g) => {
       const s = getState(g);
@@ -619,13 +563,14 @@ const GOLDEN = [
     id: 'buyFreeIf', card: 'Плов',
     order: ['Паша', 'Оля', 'Денис', 'Плов', 'Комната 402'], choose: 'Паша',
     run: (g) => {
-      takeTurn(g, 'buy'); // Плов сразу в Дом бесплатно (Паша в игре)
-      takeTurn(g, 'discard'); // Комната 402 +1 -> 3
+      g = takeTurn(g, 'buy');
+      g = takeTurn(g, 'discard');
+      return g;
     },
     expect: (g) => {
       const s = getState(g);
       assert.ok(s.home.find((c) => c.name === 'Плов'));
-      assert.equal(s.energy, 3); // не потрачено на покупку
+      assert.equal(s.energy, 3);
     },
   },
   {
@@ -635,8 +580,9 @@ const GOLDEN = [
     run: (g) => {
       while (g.status === 'playing') {
         const a = getState(g).energy >= 2 ? 'buy' : 'discard';
-        takeTurn(g, a);
+        g = takeTurn(g, a);
       }
+      return g;
     },
     expect: (g) => { assert.equal(getScore(g), 3); },
   },
@@ -652,10 +598,10 @@ const GOLDEN = [
     },
   },
   {
-    id: 'endGameIf', card: 'Обход',
+    id: 'loseIf', card: 'Обход',
     order: ['Ваня', 'Оля', 'Денис', 'Шум', 'Порванная струна', 'Шум', 'Обход', 'Шум'],
     choose: 'Ваня',
-    run: (g) => { while (g.status === 'playing') takeTurn(g, 'discard'); },
+    run: (g) => { while (g.status === 'playing') g = takeTurn(g, 'discard'); return g; },
     expect: (g) => {
       assert.equal(getState(g).status, 'lost');
       assert.equal(getScore(g), 0);
@@ -663,11 +609,12 @@ const GOLDEN = [
   },
   {
     id: 'discardTarget(activate)', card: 'Старшекур',
-    order: ['Ваня', 'Оля', 'Денис', 'Старшекур', 'Шум'], choose: 'Ваня',
+    order: ['Ваня', 'Оля', 'Денис', 'Старшекур', 'Шум', 'Комната 402'], choose: 'Ваня',
     run: (g) => {
-      takeTurn(g, 'discard'); // Шум -> угроза
-      takeTurn(g, 'buy'); // Старшекур -> дом
-      activate(g, 'Старшекур');
+      g = takeTurn(g, 'buy');
+      g = takeTurn(g, 'discard');
+      g = activate(g, 'Старшекур');
+      return g;
     },
     expect: (g) => {
       const s = getState(g);
@@ -680,12 +627,13 @@ const GOLDEN = [
     order: ['Ваня', 'Оля', 'Денис', 'Массовый перекур', 'Комната 402', 'Тост', 'Денис'],
     choose: 'Ваня',
     run: (g) => {
-      takeTurn(g, 'discard');
-      takeTurn(g, 'discard');
-      takeTurn(g, 'buy'); // Массовый перекур -> дом
+      g = takeTurn(g, 'discard');
+      g = takeTurn(g, 'discard');
+      g = takeTurn(g, 'buy');
       const before = getState(g).deck.length;
-      activate(g, 'Массовый перекур');
-      assert.equal(getState(g).deck.length, before); // длина колоды не меняется
+      g = activate(g, 'Массовый перекур');
+      assert.equal(getState(g).deck.length, before);
+      return g;
     },
     expect: () => { assert.ok(true); },
   },
@@ -693,17 +641,71 @@ const GOLDEN = [
 
 for (const sc of GOLDEN) {
   test(`H: ${sc.id} (${sc.card})`, () => {
-    const g = makeGame(sc.order, sc.choose, lcg(0xc0ffee));
+    let g = makeGame(sc.order, sc.choose, lcg(0xc0ffee));
     assertInvariants(g);
-    sc.run(g);
+    g = sc.run(g);
     assertInvariants(g);
     sc.expect(g);
   });
 }
 
-// ---- TODO: активация 🔄 и выбор ⚡ (до реализации движка уточняется API) ----
-// - activate(game, cardName) уже используется в D7.
-// - Для ⚡ при нескольких срабатывающих эффектах нужен выбор игрока:
-//   takeTurn(game, { action, eventChoice: cardName }) — контракт уточнить при движке.
-// - Возможна отдельная модельная проверка счёта (oracle): упрощённый пересчёт
-//   ПО из состояния и сверка с getScore — добавить когда движок стабилизируется.
+// ---- I. Иммутабельность / строгие фазы / валидация -----------------------
+
+test('I1: takeTurn не мутирует входной game', () => {
+  let game = makeGame(['Ваня', 'Оля', 'Денис', 'Комната 402'], 'Ваня');
+  const snap = JSON.stringify(getState(game));
+  const beforeEnergy = game.energy;
+  const after = takeTurn(game, 'discard');
+  assert.notEqual(after, game, 'должен вернуть НОВЫЙ объект');
+  assert.equal(game.energy, beforeEnergy, 'вход не изменился');
+  assert.equal(JSON.stringify(getState(game)), snap, 'вход не изменился (снапшот)');
+  assert.equal(getState(after).energy, beforeEnergy + 1);
+});
+
+test('I2: 🔄 из сброса не работает (activate возвращает тот же game при отсутствии в игре)', () => {
+  let game = makeGame(['Ваня', 'Оля', 'Денис', 'Натянуть струну'], 'Ваня');
+  // Натянуть струну в сбросе (никогда не в игре) -> activate не меняет состояние
+  const after = activate(game, 'Натянуть струну');
+  assert.equal(after, game);
+});
+
+test('I3: строгий автомат фаз — runTurnStart дважды бросает', () => {
+  let game = makeGame(['Ваня', 'Оля', 'Денис', 'Комната 402'], 'Ваня');
+  const g2 = runTurnStart(game);
+  assert.throws(() => runTurnStart(g2), /phase/i);
+});
+
+test('I4: строгий автомат фаз — resolveTop до runTurnStart бросает', () => {
+  let game = makeGame(['Ваня', 'Оля', 'Денис', 'Комната 402'], 'Ваня');
+  assert.throws(() => resolveTop(game, 'discard'), /phase/i);
+});
+
+test('I5: takeTurn при не-idle бросает (после runTurnStart)', () => {
+  let game = makeGame(['Ваня', 'Оля', 'Денис', 'Комната 402'], 'Ваня');
+  const g2 = runTurnStart(game);
+  assert.throws(() => takeTurn(g2, 'discard'), /phase/i);
+});
+
+test('I6: setup проигрывает enter-эффекты стартовой карты (Паша: бухой замешивает Угрозу)', () => {
+  let game = makeGame(['Паша: бухой', 'Оля', 'Денис'], 'Паша: бухой');
+  assert.ok(getState(game).deck.some((c) => c.arrow === 'up'), 'стартовая Паша: бухой замешивает Угрозу');
+});
+
+test('I7: нейтральная карта без action -> ошибка', () => {
+  let game = makeGame(['Ваня', 'Оля', 'Денис', 'Комната 402'], 'Ваня');
+  assert.throws(() => takeTurn(game, undefined), /invalid action/i);
+  assert.throws(() => takeTurn(game, 'fly'), /invalid action/i);
+});
+
+test('I8: валидация DSL — неизвестный op бросает', () => {
+  assert.throws(() => validateCards([{ name: 'X', effects: [{ op: 'frobnicate' }] }]), /unknown op/);
+});
+
+test('I9: валидация DSL — неверный тип поля бросает', () => {
+  assert.throws(() => validateCards([{ name: 'X', sleep: 'yes' }]), /sleep/);
+  assert.throws(() => validateCards([{ name: 'X', effects: [{ op: 'modifyVp', value: 'z' }] }]), /modifyVp/);
+});
+
+test('I10: валидация DSL — дубликат имени бросает', () => {
+  assert.throws(() => validateCards([{ name: 'X' }, { name: 'X' }]), /duplicate/);
+});

@@ -146,6 +146,7 @@ h1 { font-size: 34px; margin: 0; letter-spacing: 1px; }
   min-height: 0;
 }
 .card.center { width: 220px; max-width: 70vw; touch-action: none; }
+#play-row { display: flex; align-items: center; justify-content: center; gap: 12px; }
 #center-card .card { touch-action: none; }
 
 /* ---- energy / footer ---- */
@@ -173,7 +174,7 @@ h1 { font-size: 34px; margin: 0; letter-spacing: 1px; }
 /* ---- решение: подпись влияния на энергию + пилл-кнопки ---- */
 #play-row {
   display: flex;
-  flex-direction: column;
+  flex-direction: row;
   align-items: center;
   justify-content: center;
   gap: 12px;
@@ -200,25 +201,31 @@ h1 { font-size: 34px; margin: 0; letter-spacing: 1px; }
 .btn-choice {
   border: none;
   border-radius: 14px;
-  padding: 11px 10px;
+  padding: 6px 12px;
   font-size: 16px;
   font-weight: 800;
   line-height: 1.1;
-  color: #fff;
-  box-shadow: var(--shadow);
+  color: var(--muted);
+  background: transparent;
+  box-shadow: none;
   cursor: pointer;
   display: flex;
   flex-direction: column;
   align-items: center;
   gap: 2px;
-  flex: 1 1 0;
+  flex: 0 0 auto;
   min-width: 0;
 }
 .btn-choice .lbl { font-size: 16px; }
 .btn-choice .e { font-size: 13px; font-weight: 600; opacity: .92; }
-.btn-choice.discard { background: var(--muted); }
-.btn-choice.buy { background: var(--accent2); }
+.btn-choice.discard { background: transparent; color: var(--muted); }
+.btn-choice.buy { background: transparent; color: var(--accent2); }
 .btn-choice:active { transform: translateY(1px); }
+.btn-choice { display: flex; flex-direction: column; align-items: center; gap: 2px; justify-content: center; }
+.btn-choice .arr { font-size: 26px; line-height: 1; }
+.btn-choice.discard .e { color: var(--accent2); }
+.btn-choice .pos { color: var(--accent2); }
+.btn-choice .neg { color: var(--danger); }
 
 /* ---- card ---- */
 .card {

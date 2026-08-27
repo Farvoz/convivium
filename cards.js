@@ -15,7 +15,7 @@ const cards = [
     description: '⚡ Если в конце хода в зоне угрозы есть 3 Угрозы, то ПРОИГРЫШ',
     arrow: 'up',
     threat: false,
-    effects: [{ when: 'turnEnd', op: 'endGameIf', condition: { threatsCount: 3 }, result: 'loss' }],
+    loseIf: { threatsCount: 3 },
   },
   {
     name: 'Комната 402',
@@ -41,8 +41,8 @@ const cards = [
     arrow: 'down',
     effects: [
       { when: 'enter', op: 'replace', match: { name: 'Шура' }, in: 'home' },
-      { when: 'enter', op: 'setFlag', key: 'shumCountsAsTwoThreats', value: true },
     ],
+    threatWeight: { match: { name: 'Шум' }, weight: 2 },
   },
   {
     name: 'Порванная струна',
@@ -65,7 +65,7 @@ const cards = [
   {
     name: 'Хит',
     description: '❗️ Подложи под любого человека: +1 ПО. Если под гитариста — ещё +1 ПО. Если некого — в сброс.',
-    attach: { match: { person: true }, bonusVp: 1 },
+    attach: { match: { person: true }, bonusVp: 1, bonusIfTag: 'guitarist' },
     vp: 1,
   },
   {
@@ -103,7 +103,7 @@ const cards = [
   {
     name: 'Кровать',
     description: "❗️ При входе в игру накрывает самого левого человека. Он теперь \"спит\"",
-    effects: [{ when: 'enter', op: 'sleep', selector: 'leftmostPerson' }],
+    sleep: true,
     arrow: 'down'
   },
   {
@@ -111,7 +111,7 @@ const cards = [
     description:
       '⚡ Каждый ход перед взятием карты, положи взакрытую 1 карту с верха колоды под эту. Если накопится 3 или Палёный алкоголь устранят, сбрось также и все накопленные карты',
     arrow: 'up',
-    effects: [{ when: 'turnStart', op: 'accumulate', perTurn: 1, max: 3 }],
+    effects: [{ when: 'turnStart', op: 'accumulate', max: 3 }],
   },
   {
     name: 'Оля',

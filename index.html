@@ -48,17 +48,19 @@
           <button id="btn-take" class="btn-primary">Взять карту</button>
         </div>
         <div id="play-row">
+          <button id="btn-discard" class="btn-choice discard arrow hidden" aria-label="Сбросить">
+            <span class="arr">◀</span>
+            <span class="lbl">Сброс</span>
+            <span class="e">+1⚡</span>
+          </button>
           <div id="center-card" class="card center"></div>
-          <div id="play-info" class="play-info"></div>
-          <div id="play-actions" class="play-actions hidden">
-            <button id="btn-discard" class="btn-choice discard" aria-label="Сбросить">
-              <span class="lbl">↩ Сброс</span>
-            </button>
-            <button id="btn-buy" class="btn-choice buy" aria-label="Купить">
-              <span class="lbl">🛒 Купить</span>
-            </button>
-          </div>
+          <button id="btn-buy" class="btn-choice buy arrow hidden" aria-label="Купить">
+            <span class="arr">▶</span>
+            <span class="lbl">Купить</span>
+            <span class="e" id="buy-e">−2⚡</span>
+          </button>
         </div>
+        <div id="play-info" class="play-info"></div>
       </div>
 
       <div id="energy" class="energy">⚡ <span id="energy-val">0</span></div>

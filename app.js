@@ -222,6 +222,7 @@ function stripCardEl(c) {
 }
 
 function render() {
+  if (tc.state.phase === 'gameover') { endGame(); return; }
   const s = getState(tc.state.game);
   const screen = tc.state.phase === 'prep' ? 'prep'
     : tc.state.phase === 'gameover' ? 'end' : 'game';

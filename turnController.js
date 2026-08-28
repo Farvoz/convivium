@@ -5,7 +5,7 @@
 (function () {
   const {
     createGame, setup, runTurnStart, getTopCard, resolveTop, activate,
-    deriveAsleepSet, isBuyFree, matches, deriveThreatCount,
+    deriveAsleepSet, isBuyFree, deriveBuyCost, matches, deriveThreatCount,
   } = globalThis.Convivium;
 
   function createTurnController({ render, log, promptChoice }) {
@@ -28,8 +28,11 @@
       if (card.arrow === 'up') log('Угроза: ' + card.name);
       else if (card.arrow === 'down') log(card.name + ' → Дом');
       else if (action === 'discard') log('Сброс: ' + card.name + ' (+1⚡)');
-      else log((isBuyFree(state.game, card) ? 'Куплено (бесплатно): ' : 'Куплено: ') +
-        card.name + (isBuyFree(state.game, card) ? '' : ' (−2⚡)'));
+      else {
+        const cost = deriveBuyCost(state.game);
+        log((isBuyFree(state.game, card) ? 'Куплено (бесплатно): ' : 'Куплено: ') +
+          card.name + (isBuyFree(state.game, card) ? '' : ` (−${cost}⚡)`));
+      }
     }
 
     function newSession(deck) {
@@ -80,7 +83,7 @@
 
     function assess() {
       const card = state.topCard;
-      state.canBuy = state.game.energy >= 2 || isBuyFree(state.game, card);
+      state.canBuy = state.game.energy >= deriveBuyCost(state.game) || isBuyFree(state.game, card);
       return { arrow: !!(card && card.arrow), canBuy: state.canBuy };
     }
 

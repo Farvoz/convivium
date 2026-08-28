@@ -21,9 +21,9 @@ const isHarmful = (c) => C.isThreat(c) || c.arrow === 'down';
 const harmfulTotal = globalThis.cards.filter(isHarmful).length;
 const countHarmful = (deck) => deck.filter(isHarmful).length;
 
-test('buildDeck: длина = все карты минус лишние вредные (только 3 инъектируются)', () => {
+test('buildDeck: длина = все карты минус лишние вредные (только 4 инъектируются)', () => {
   const deck = C.buildDeck();
-  const expected = globalThis.cards.length - Math.max(0, harmfulTotal - 3);
+  const expected = globalThis.cards.length - Math.max(0, harmfulTotal - 4);
   assert.equal(deck.length, expected);
 });
 
@@ -32,9 +32,9 @@ test('buildDeck: «Обход» присутствует', () => {
   assert.ok(deck.some((c) => c.name === 'Обход'));
 });
 
-test('buildDeck: ровно 3 вредные карты в колоде (дефолт)', () => {
+test('buildDeck: ровно 4 вредные карты в колоде (дефолт)', () => {
   const deck = C.buildDeck();
-  assert.equal(countHarmful(deck), 3);
+  assert.equal(countHarmful(deck), 4);
 });
 
 test('buildDeck: первые 3 — это prep (не вредные)', () => {
@@ -55,8 +55,8 @@ test('buildDeck: детерминизм при одном seed', () => {
   assert.deepEqual(a.map((c) => c.name), b.map((c) => c.name));
 });
 
-test('buildDeck: withObhod:false убирает «Обход» и оставляет 3 вредные', () => {
+test('buildDeck: withObhod:false убирает «Обход» и оставляет 4 вредные', () => {
   const deck = C.buildDeck({ withObhod: false });
   assert.equal(deck.some((c) => c.name === 'Обход'), false);
-  assert.equal(countHarmful(deck), 3);
+  assert.equal(countHarmful(deck), 4);
 });

@@ -9,7 +9,7 @@
 const {
   createGame, setup, getScore, getState, activate,
   runTurnStart, getTopCard, resolveTop, deriveThreatBreakdown, deriveScoreBreakdown,
-  deriveThreatCount, isThreat, matches, conditionMet, deriveAsleepSet, isPerson, isBuyFree,
+  deriveThreatCount, isThreat, matches, conditionMet, deriveAsleepSet, isPerson, isBuyFree, deriveBuyCost,
   createTurnController, buildDeck, enableGesture, disableGesture,
 } = globalThis.Convivium;
 
@@ -30,7 +30,7 @@ const ICON_MAP = {
   'Обход': '🚪', 'Комната 402': '🚪', 'Порванная струна': '🎸', 'Шум': '📢',
   'Звёздный час': '🌟', 'Плов': '🍚', 'Кровать': '🛏️', 'Конфликт': '💢',
   'День рождения!': '🎂', 'Палёный алкоголь': '🥃', 'Тост': '🥂',
-  'Большая вечеринка': '🎉', 'Старшекур': '🧓', 'Массовый перекур': '🚬',
+  'Большая вечеринка': '🎉', 'Старшекур': '🧓', 'Массовый перекур': '🚬', 'Грязь': '🤢',
 };
 const TAG_ICON = { guitarist: '🎸', man: '👨', woman: '👩', place: '📍' };
 
@@ -397,7 +397,7 @@ function showActions(canBuy) {
   const buyE = $('buy-e');
   if (buyE) buyE.innerHTML = isBuyFree(tc.state.game, tc.state.topCard)
     ? '<span class="pos">0⚡</span>'
-    : '<span class="neg">−2⚡</span>';
+    : '<span class="neg">−' + deriveBuyCost(tc.state.game) + '⚡</span>';
   $('btn-discard').classList.remove('hidden');
   $('btn-buy').classList.toggle('hidden', !canBuy);
   $('btn-discard').onclick = () => submitDecision('discard');
@@ -412,7 +412,7 @@ function updatePlayInfo(card) {
   } else if (card.arrow === 'down') {
     info.innerHTML = '<span class="down">⬇ Авто</span> — сразу в Дом';
   } else {
-    const buyE = isBuyFree(tc.state.game, card) ? '<span class="pos">0⚡</span>' : '<span class="neg">−2⚡</span>';
+    const buyE = isBuyFree(tc.state.game, card) ? '<span class="pos">0⚡</span>' : '<span class="neg">−' + deriveBuyCost(tc.state.game) + '⚡</span>';
     info.innerHTML = 'Сброс <span class="pos">+1⚡</span> · Купить ' + buyE;
   }
 }

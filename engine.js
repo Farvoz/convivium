@@ -114,6 +114,10 @@ const OP_REGISTRY = {
     kind: 'derive', phaseable: false,
     validate(e, where) { if (typeof e.amount !== 'number') throw new Error(`${where}: scorePerPerson.amount number`); },
   },
+  addBuyCost: {
+    kind: 'derive', phaseable: false,
+    validate(e, where) { if (typeof e.amount !== 'number') throw new Error(`${where}: addBuyCost.amount number`); },
+  },
   buyFreeIf: {
     kind: 'cond', phaseable: false,
     validate(e, where) { validateMatch(e.match, where + '.buyFreeIf'); },
@@ -362,8 +366,9 @@ function placeCard(g, card, action) {
   } else {
     if (action !== 'buy' && action !== 'discard') throw new Error(`invalid action for neutral card ${c.name}: ${action}`);
     const free = isBuyFree(g, c);
-    if (action === 'buy' && (free || g.energy >= 2)) {
-      g.energy -= free ? 0 : 2;
+    const cost = deriveBuyCost(g);
+    if (action === 'buy' && (free || g.energy >= cost)) {
+      g.energy -= free ? 0 : cost;
       g.home.push(c);
       runEnterActions(g, c);
     } else if (action === 'discard') {
@@ -567,6 +572,18 @@ function getScore(game) {
   return deriveSnapshot(game).score;
 }
 
+// Стоимость покупки нейтральной карты: база 2 + сумма addBuyCost от карт в игре.
+// Грязь и подобные карты повышают цену; free-покупки (buyFreeIf) игнорируют её.
+function deriveBuyCost(game) {
+  let cost = 2;
+  for (const c of inPlayCards(game)) {
+    for (const e of c.effects || []) {
+      if (e.op === 'addBuyCost') cost += e.amount;
+    }
+  }
+  return cost;
+}
+
 // Вклады в итоговый счёт, точно суммирующиеся в getScore (для таблицы финала).
 function deriveScoreBreakdown(game) {
   return deriveSnapshot(game).scoreRows;
@@ -649,7 +666,7 @@ function shuffle(arr, rng) {
 // all карты клонируются; prep карт открываются для подготовки;
 // «Обход» + N случайных вредных (угроза/авто) инъектируются обратно в колоду.
 function buildDeck(opts = {}, rng = Math.random) {
-  const { prep = 3, harmful = 3, withObhod = true } = opts;
+  const { prep = 3, harmful = 4, withObhod = true } = opts;
   const all = (globalThis.cards || []).map(cloneCard);
   const obhod = withObhod ? all.find((c) => c.name === 'Обход') : null;
   const harmfulCards = all.filter((c) => isThreat(c) || c.arrow === 'down');
@@ -671,6 +688,6 @@ function buildDeck(opts = {}, rng = Math.random) {
 
 globalThis.Convivium = {
   createGame, setup, takeTurn, runTurnStart, getTopCard, resolveTop, activate, getState, getScore,
-  deriveThreatCount, deriveThreatBreakdown, deriveScoreBreakdown, deriveStatus, isThreat, validateCards, checkAttachInvariant,
+  deriveThreatCount, deriveThreatBreakdown, deriveScoreBreakdown, deriveStatus, deriveBuyCost, isThreat, validateCards, checkAttachInvariant,
   matches, conditionMet, deriveAsleepSet, isPerson, isBuyFree, cloneCard, buildDeck,
 };

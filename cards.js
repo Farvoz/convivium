@@ -121,6 +121,12 @@ const cards = [
     effects: [{ when: 'turnStart', op: 'accumulate', max: 3 }],
   },
   {
+    name: 'Грязь',
+    description: 'Угроза. Покупка новых карт теперь стоит 3 энергии (вместо 2)',
+    arrow: 'up',
+    effects: [{ op: 'addBuyCost', amount: 1 }],
+  },
+  {
     name: 'Оля',
     tags: ['woman'],
   },

@@ -6,7 +6,7 @@ import './cards.js';
 import './engine.js';
 const { cards } = globalThis;
 const {
-  createGame, setup, takeTurn, runTurnStart, resolveTop, getScore, getState, activate, deriveThreatCount, deriveScoreBreakdown, validateCards, checkAttachInvariant, cloneCard,
+  createGame, setup, takeTurn, runTurnStart, resolveTop, getScore, getState, activate, deriveThreatCount, deriveScoreBreakdown, deriveBuyCost, validateCards, checkAttachInvariant, cloneCard,
 } = globalThis.Convivium;
 
 // ---- helpers -------------------------------------------------------------
@@ -273,6 +273,50 @@ test('D8: Большая вечеринка даёт +1 ПО за каждого
   assert.equal(getScore(game), 3);
 });
 
+// ---- L. Грязь (динамическая стоимость покупки) ---------------------------
+
+test('L1: Грязь (arrow up) уходит в Зону Угрозы и повышает стоимость покупки до 3', () => {
+  let game = makeGame(['Ваня', 'Оля', 'Денис', 'Грязь', 'Комната 402'], 'Ваня');
+  game = takeTurn(game, 'buy'); // Грязь -> Зона Угрозы автоматически
+  const s = getState(game);
+  assert.ok(s.threat.find((c) => c.name === 'Грязь'), 'Грязь должна быть в Зоне Угрозы');
+  assert.equal(s.energy, 2, 'Грязь не тратит энергию при входе');
+  // энергии 2 < 3 -> покупка недоступна
+  assert.throws(() => takeTurn(game, 'buy'), /energy/i);
+});
+
+test('L1b: при 3+ энергии покупка под Грязь тратит ровно 3', () => {
+  let game = makeGame(
+    ['Ваня', 'Оля', 'Денис', 'Грязь', 'Комната 402', 'Комната 402'],
+    'Ваня'
+  );
+  game = takeTurn(game, 'buy');   // Грязь -> Дом, energy 2
+  game = takeTurn(game, 'discard'); // +1 -> 3
+  const before = getState(game).energy;
+  game = takeTurn(game, 'buy');   // покупка Комната 402 за 3
+  assert.equal(getState(game).energy, before - 3);
+});
+
+test('L1c: deriveBuyCost равен 2 без Грязь и 3 с Грязь', () => {
+  let game = makeGame(['Ваня', 'Оля', 'Денис', 'Комната 402'], 'Ваня');
+  assert.equal(deriveBuyCost(game), 2);
+  game = takeTurn(game, 'buy'); // Комната 402 (arrow down) -> Дом, не Грязь
+  assert.equal(deriveBuyCost(game), 2);
+  const g2 = makeGame(['Ваня', 'Оля', 'Денис', 'Грязь'], 'Ваня');
+  const g2b = takeTurn(g2, 'buy'); // Грязь -> Зона Угрозы
+  assert.equal(deriveBuyCost(g2b), 3);
+});
+
+test('L2: Грязь считается Угрозой для Обхода (3 угрозы -> поражение)', () => {
+  let game = makeGame(
+    ['Ваня', 'Оля', 'Денис', 'Шум', 'Грязь', 'Шум', 'Обход'],
+    'Ваня'
+  );
+  game = runToEnd(game, 'discard');
+  assert.equal(getState(game).status, 'lost');
+  assert.equal(getScore(game), 0);
+});
+
 // ---- D9. Активация 🔄 ----------------------------------------------------
 
 test('D9: активация 🔄 из Дома применяет эффект и уходит в сброс без энергии', () => {
@@ -371,7 +415,7 @@ test('E1: инварианты держатся в ручной партии (п
   assertInvariants(game);
   let guard = 0;
   while (game.status === 'playing' && guard++ < 100) {
-    const action = getState(game).energy >= 2 ? 'buy' : 'discard';
+    const action = getState(game).energy >= deriveBuyCost(game) ? 'buy' : 'discard';
     game = takeTurn(game, action);
     assertInvariants(game);
   }
@@ -437,7 +481,8 @@ function simulate(seed) {
   let turns = 0;
   while (game.status === 'playing' && turns < 20000) {
     const energy = getState(game).energy;
-    const action = energy >= 2 ? (rng() < 0.6 ? 'buy' : 'discard') : 'discard';
+    const cost = deriveBuyCost(game);
+    const action = energy >= cost ? (rng() < 0.6 ? 'buy' : 'discard') : 'discard';
     game = takeTurn(game, action);
     assertInvariants(game);
     turns++;

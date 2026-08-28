@@ -202,45 +202,45 @@ test('D4c: Паша заменяет Паша: бухой, если бухой �
   assert.ok(s.home.find((c) => c.name === 'Паша'));
 });
 
-test('D5: Хит под гитаристом даёт +1 ПО', () => {
-  let game = makeGame(['Ваня', 'Оля', 'Денис', 'Хит'], 'Ваня');
+test('D5: Звёздный час под гитаристом даёт +1 ПО', () => {
+  let game = makeGame(['Ваня', 'Оля', 'Денис', 'Звёздный час'], 'Ваня');
   game = takeTurn(game, 'buy');
   const s = getState(game);
   const vanya = s.home.find((c) => c.name === 'Ваня');
-  assert.ok(vanya.attached && vanya.attached.some((c) => c.name === 'Хит'));
+  assert.ok(vanya.attached && vanya.attached.some((c) => c.name === 'Звёздный час'));
   assert.equal(getScore(game), 3);
 });
 
-test('D5b: Хит под не-гитаристом даёт только базу 1 ПО', () => {
-  let game = makeGame(['Паша', 'Оля', 'Денис', 'Хит'], 'Паша');
+test('D5b: Звёздный час под не-гитаристом даёт только базу 1 ПО', () => {
+  let game = makeGame(['Паша', 'Оля', 'Денис', 'Звёздный час'], 'Паша');
   game = takeTurn(game, 'buy');
   const s = getState(game);
   const pasha = s.home.find((c) => c.name === 'Паша');
-  assert.ok(pasha.attached && pasha.attached.some((c) => c.name === 'Хит'));
+  assert.ok(pasha.attached && pasha.attached.some((c) => c.name === 'Звёздный час'));
   assert.equal(getScore(game), 1);
 });
 
-test('D5c: Хит без человека в Доме уходит в сброс', () => {
-  let game = makeGame(['Плов', 'Оля', 'Денис', 'Хит'], 'Плов');
+test('D5c: Звёздный час без человека в Доме уходит в сброс', () => {
+  let game = makeGame(['Плов', 'Оля', 'Денис', 'Звёздный час'], 'Плов');
   game = takeTurn(game, 'buy');
   const s = getState(game);
-  assert.ok(!s.home.some((c) => c.name === 'Хит'));
-  assert.ok(s.discard.some((c) => c.name === 'Хит'));
+  assert.ok(!s.home.some((c) => c.name === 'Звёздный час'));
+  assert.ok(s.discard.some((c) => c.name === 'Звёздный час'));
   assert.equal(getScore(game), 1);
 });
 
-test('D5d: Хит можно выбрать не самого левого человека', () => {
+test('D5d: Звёздный час можно выбрать не самого левого человека', () => {
   const chooseFn = (opts) => opts.find((c) => c.name === 'Оля') || opts[0];
-  const g = createGame({ deck: [cloneCard(byName['Хит'])], choose: chooseFn });
+  const g = createGame({ deck: [cloneCard(byName['Звёздный час'])], choose: chooseFn });
   g.home = [cloneCard(byName['Ваня']), cloneCard(byName['Оля'])];
   g.energy = 2;
   const after = takeTurn(g, 'buy');
   const s = getState(after);
   const vanya = s.home.find((c) => c.name === 'Ваня');
   const olya = s.home.find((c) => c.name === 'Оля');
-  assert.ok(!(vanya.attached || []).some((c) => c.name === 'Хит'), 'Хит не должен быть у левого Вани');
-  assert.ok(olya.attached && olya.attached.some((c) => c.name === 'Хит'), 'Хит должен быть у выбранной Оли');
-  assert.equal(getScore(after), 2); // Ваня(1) + Оля(1) + Хит база под Олей(1)
+  assert.ok(!(vanya.attached || []).some((c) => c.name === 'Звёздный час'), 'Звёздный час не должен быть у левого Вани');
+  assert.ok(olya.attached && olya.attached.some((c) => c.name === 'Звёздный час'), 'Звёздный час должен быть у выбранной Оли');
+  assert.equal(getScore(after), 2); // Ваня(1) + Оля(1) + Звёздный час база под Олей(1)
 });
 
 test('D6: Порванная струна обнуляет ПО гитаристов', () => {
@@ -395,19 +395,19 @@ test('E2: инварианты держатся при накоплении Па
 
 test('E3: при замене владельца прикреплённая аттач-карта уходит в сброс', () => {
   let game = makeGame(
-    ['Шура', 'Оля', 'Денис', 'Хит', 'Шура: бухой'],
+    ['Шура', 'Оля', 'Денис', 'Звёздный час', 'Шура: бухой'],
     'Шура'
   );
-  game = takeTurn(game, 'buy'); // Хит прикрепляется к Шуре
+  game = takeTurn(game, 'buy'); // Звёздный час прикрепляется к Шуре
   const s1 = getState(game);
   const shura = s1.home.find((c) => c.name === 'Шура');
-  assert.ok(shura.attached && shura.attached.some((c) => c.name === 'Хит'), 'Хит должен быть прикреплён к Шуре');
+  assert.ok(shura.attached && shura.attached.some((c) => c.name === 'Звёздный час'), 'Звёздный час должен быть прикреплён к Шуре');
   game = takeTurn(game, 'buy'); // Шура: бухой заменяет Шуру
   const s2 = getState(game);
   assert.equal(s2.home.find((c) => c.name === 'Шура'), undefined, 'Шура заменён');
   assert.ok(s2.home.find((c) => c.name === 'Шура: бухой'), 'Шура: бухой в Доме');
-  assert.equal(s2.home.some((c) => c.name === 'Хит'), false, 'Хит не должен висеть в Доме');
-  assert.ok(s2.discard.some((c) => c.name === 'Хит'), 'Хит должен уйти в сброс');
+  assert.equal(s2.home.some((c) => c.name === 'Звёздный час'), false, 'Звёздный час не должен висеть в Доме');
+  assert.ok(s2.discard.some((c) => c.name === 'Звёздный час'), 'Звёздный час должен уйти в сброс');
   assertInvariants(game);
 });
 
@@ -558,13 +558,13 @@ const GOLDEN = [
     },
   },
   {
-    id: 'modifyVp+attach (BUG2)', card: 'Порванная струна + Хит',
-    order: ['Ваня', 'Оля', 'Денис', 'Хит', 'Порванная струна'], choose: 'Ваня',
+    id: 'modifyVp+attach (BUG2)', card: 'Порванная струна + Звёздный час',
+    order: ['Ваня', 'Оля', 'Денис', 'Звёздный час', 'Порванная струна'], choose: 'Ваня',
     run: (g) => { g = takeTurn(g, 'buy'); g = takeTurn(g, 'discard'); return g; },
     expect: (g) => {
       const s = getState(g);
       const v = s.home.find((c) => c.name === 'Ваня');
-      // гитарист обнулён, но прикреплённый Хит (vp1 + bonus1) сохраняется
+      // гитарист обнулён, но прикреплённый Звёздный час (vp1 + bonus1) сохраняется
       assert.equal(v.vpEffective, 2);
       assert.equal(getScore(g), 2);
     },
@@ -629,13 +629,13 @@ const GOLDEN = [
     expect: (g) => { assert.equal(getScore(g), 3); },
   },
   {
-    id: 'attach', card: 'Хит',
-    order: ['Ваня', 'Оля', 'Денис', 'Хит'], choose: 'Ваня',
+    id: 'attach', card: 'Звёздный час',
+    order: ['Ваня', 'Оля', 'Денис', 'Звёздный час'], choose: 'Ваня',
     run: (g) => takeTurn(g, 'buy'),
     expect: (g) => {
       const s = getState(g);
       const v = s.home.find((c) => c.name === 'Ваня');
-      assert.ok(v.attached && v.attached.some((c) => c.name === 'Хит'));
+      assert.ok(v.attached && v.attached.some((c) => c.name === 'Звёздный час'));
       assert.equal(getScore(g), 3);
     },
   },
@@ -693,8 +693,8 @@ for (const sc of GOLDEN) {
 
 // ---- J. Сон = «пустая» карта / peekReorder -------------------------------
 
-test('J1: Хит не прикрепляется к спящему человеку (идёт к бодрствующему)', () => {
-  const g = createGame({ deck: [cloneCard(byName['Хит'])] });
+test('J1: Звёздный час не прикрепляется к спящему человеку (идёт к бодрствующему)', () => {
+  const g = createGame({ deck: [cloneCard(byName['Звёздный час'])] });
   g.home = [cloneCard(byName['Ваня']), cloneCard(byName['Оля'])];
   const bed = cloneCard(byName['Кровать']);
   g.home[0].attached = [bed];
@@ -704,8 +704,8 @@ test('J1: Хит не прикрепляется к спящему челове�
   const s = getState(after);
   const vanya = s.home.find((c) => c.name === 'Ваня');
   const olya = s.home.find((c) => c.name === 'Оля');
-  assert.ok(!(vanya.attached || []).some((c) => c.name === 'Хит'), 'Хит не должен быть у спящего Вани');
-  assert.ok(olya.attached && olya.attached.some((c) => c.name === 'Хит'), 'Хит должен быть у бодрствующей Оли');
+  assert.ok(!(vanya.attached || []).some((c) => c.name === 'Звёздный час'), 'Звёздный час не должен быть у спящего Вани');
+  assert.ok(olya.attached && olya.attached.some((c) => c.name === 'Звёздный час'), 'Звёздный час должен быть у бодрствующей Оли');
   assert.equal(getScore(after), 1);
 });
 
@@ -736,7 +736,7 @@ test('J3: conditionMet ложно для спящего гитариста (На
 });
 
 test('J4: peekReorder через game.reorder реально меняет порядок верхних карт', () => {
-  const g = createGame({ deck: [cloneCard(byName['Комната 402']), cloneCard(byName['Тост']), cloneCard(byName['Плов']), cloneCard(byName['Хит'])] });
+  const g = createGame({ deck: [cloneCard(byName['Комната 402']), cloneCard(byName['Тост']), cloneCard(byName['Плов']), cloneCard(byName['Звёздный час'])] });
   g.home = [cloneCard(byName['Ваня']), cloneCard(byName['Массовый перекур'])];
   g.reorder = (top) => [...top].reverse();
   const before = g.deck.map((c) => c.name).join(',');

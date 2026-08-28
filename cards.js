@@ -66,7 +66,7 @@ const cards = [
     arrow: 'up',
   },
   {
-    name: 'Хит',
+    name: 'Звёздный час',
     description: '❗️ Подложи под любого человека: +1 ПО. Если под гитариста — ещё +1 ПО. Если некого — в сброс.',
     attach: { match: { person: true }, bonusVp: 1, bonusIfTag: 'guitarist', choose: true },
     vp: 1,

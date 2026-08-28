@@ -27,10 +27,10 @@ const FACE_MAP = {
   '3-й сосед': 'faces/face_vova.png',
 };
 const ICON_MAP = {
-  'Обход': '🚪', 'Комната 402': '📍', 'Порванная струна': '🎸', 'Шум': '🔊',
-  'Хит': '🎵', 'Плов': '🍚', 'Кровать': '🛏️', 'Конфликт': '⚡',
-  'День рождения!': '🎂', 'Палёный алкоголь': '🔥', 'Тост': '🥂',
-  'Большая вечеринка': '🎉', 'Старшекур': '🚬', 'Массовый перекур': '🚬',
+  'Обход': '🚪', 'Комната 402': '🚪', 'Порванная струна': '🎸', 'Шум': '📢',
+  'Звёздный час': '🌟', 'Плов': '🍚', 'Кровать': '🛏️', 'Конфликт': '💢',
+  'День рождения!': '🎂', 'Палёный алкоголь': '🥃', 'Тост': '🥂',
+  'Большая вечеринка': '🎉', 'Старшекур': '🧓', 'Массовый перекур': '🚬',
 };
 const TAG_ICON = { guitarist: '🎸', man: '👨', woman: '👩', place: '📍' };
 
@@ -45,6 +45,17 @@ function vpStars(vp) {
   if (n === 0) return '';
   const stars = '★'.repeat(n);
   return vp < 0 ? `<span class="neg">−${stars}</span>` : stars;
+}
+
+function effectIcons(card) {
+  const out = [];
+  if (card.cost === '🔄') out.push('🔄');
+  if (card.attach) out.push('📎');
+  if (card.sleep) out.push('😴');
+  if ((card.effects || []).some((e) => e.op === 'accumulate' || e.when === 'turnStart')) out.push('⚡');
+  if (card.arrow === 'down') out.push('⬇');
+  else if (card.arrow === 'up') out.push('⬆');
+  return out;
 }
 
 // ---------------------------------------------------------------------------
@@ -84,6 +95,8 @@ function renderCardEl(card, { compact = false, detail = false } = {}) {
   const el = document.createElement('div');
   el.className = 'card' + (compact ? ' compact' : '') + (detail ? ' detail' : '');
   if (card.asleep) el.classList.add('asleep');
+  if (card.arrow === 'up') el.classList.add('neg', 'threat');
+  else if (card.arrow === 'down') el.classList.add('neg', 'auto');
 
   const img = document.createElement('div');
   img.className = 'card-img';
@@ -135,6 +148,15 @@ function renderCardEl(card, { compact = false, detail = false } = {}) {
     meta.appendChild(t);
   }
   if (meta.childNodes.length) head.appendChild(meta);
+
+  const eff = effectIcons(card);
+  if (!compact && eff.length) {
+    const eb = document.createElement('div');
+    eb.className = 'card-effect-bar';
+    eb.textContent = eff.join(' ');
+    body.appendChild(eb);
+  }
+
   if (!compact && card.description) {
     const d = document.createElement('div');
     d.className = 'card-desc';
@@ -255,8 +277,12 @@ function goPrep() {
   row.innerHTML = '';
   for (const c of top3) {
     const el = renderCardEl(c);
-    el.classList.add('clickable');
-    el.onclick = () => choosePrepUI(c);
+    el.classList.add('clickable', 'prep-card');
+    const badge = document.createElement('div');
+    badge.className = 'card-badge-free';
+    badge.textContent = '0⚡';
+    el.appendChild(badge);
+    el.onclick = () => openDetail(c, { onConfirm: choosePrepUI, confirmLabel: 'Взять в Дом' });
     row.appendChild(el);
   }
 }
@@ -463,7 +489,7 @@ async function promptChoiceAdapter(payload) {
 // ---------------------------------------------------------------------------
 // Оверлеи деталей/сброса
 // ---------------------------------------------------------------------------
-function openDetail(c) {
+function openDetail(c, opts = {}) {
   const d = $('detail-card');
   d.innerHTML = '';
   d.appendChild(renderCardEl(c, { detail: true }));
@@ -474,7 +500,34 @@ function openDetail(c) {
     sub.textContent = 'Подложено: ' + c.attached.map((a) => a.name).join(', ');
     d.appendChild(sub);
   }
+
+  const vp = c.vpEffective != null ? c.vpEffective : (c.vp || 0);
+  let hintText = '';
+  if (vp) hintText += 'ПО — победные очки. ';
+  if (c.asleep) {
+    const sleeper = (c.attached || []).find((a) => a.sleep);
+    hintText += 'Спит: накрыт(а) картой «' + (sleeper ? sleeper.name : '?') + '».';
+  }
+  if (hintText) {
+    const hint = document.createElement('div');
+    hint.className = 'detail-hint';
+    hint.textContent = hintText;
+    d.appendChild(hint);
+  }
   $('detail-overlay').classList.remove('hidden');
+
+  const confirmBtn = $('detail-confirm');
+  if (opts.onConfirm) {
+    confirmBtn.textContent = opts.confirmLabel || 'Взять в Дом';
+    confirmBtn.classList.remove('hidden');
+    confirmBtn.onclick = () => {
+      $('detail-overlay').classList.add('hidden');
+      opts.onConfirm(c);
+    };
+  } else {
+    confirmBtn.classList.add('hidden');
+    confirmBtn.onclick = null;
+  }
 }
 
 function openDiscard() {

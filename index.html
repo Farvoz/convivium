@@ -20,16 +20,20 @@
       <div class="start-box">
         <div class="logo">🥂</div>
         <h1>Convivium</h1>
-        <p class="lead">Доживи до конца колоды и набери побольше очков.</p>
-        <button id="btn-start" class="btn-primary">Играть</button>
+      <p class="lead">Проведи хорошо время!</p>
+      <button id="btn-start" class="btn-primary">Играть</button>
       </div>
     </section>
 
     <!-- Prep -->
     <section id="screen-prep" class="screen hidden">
-      <h2>Подготовка</h2>
-      <p class="hint">Выбери одну карту бесплатно в Дом. Остальные уйдут в сброс.</p>
-      <div id="prep-cards" class="card-row"></div>
+      <div class="prep-head">
+        <div class="prep-emoji">🍽️</div>
+        <h2>Подготовка</h2>
+        <p class="prep-sub">Шаг 1 · бесплатный выбор</p>
+      </div>
+      <p class="hint">Нажми на карту, чтобы посмотреть подробнее, потом подтверди выбор. Одну заберёшь в Дом бесплатно, остальные уйдут в сброс.</p>
+      <div id="prep-cards" class="card-row prep-row"></div>
     </section>
 
     <!-- Game -->
@@ -115,6 +119,7 @@
     <div id="detail-overlay" class="overlay hidden">
       <div class="overlay-inner">
         <div id="detail-card"></div>
+        <button id="detail-confirm" class="btn-primary wide hidden">Взять в Дом</button>
         <button id="detail-close" class="btn-small wide">Закрыть</button>
       </div>
     </div>

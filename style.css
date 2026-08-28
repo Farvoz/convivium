@@ -8,7 +8,7 @@
   --accent2: #6fae8f;
   --danger: #c0392b;
   --threat: #b9472f;
-  --shadow: 0 6px 18px rgba(80, 60, 30, 0.18);
+  --shadow: 0 3px 10px rgba(80, 60, 30, 0.15);
   --radius: 16px;
 }
 
@@ -89,7 +89,33 @@ html, body {
 }
 .logo { font-size: 64px; line-height: 1; }
 h1 { font-size: 34px; margin: 0; letter-spacing: 1px; }
-#screen-prep h2 { text-align: center; margin: 0 0 4px; }
+#screen-prep h2 { text-align: center; margin: 2px 0 0; }
+.prep-head { text-align: center; }
+.prep-emoji { font-size: 40px; line-height: 1; }
+.prep-sub {
+  text-align: center; color: var(--accent); font-weight: 700;
+  font-size: 12px; letter-spacing: .5px; text-transform: uppercase;
+  margin: 2px 0 0;
+}
+#screen-prep .hint { max-width: 340px; margin: 0 auto; }
+.prep-row { margin-top: 4px; }
+
+/* крупные карты подготовки: трое в ряд на любом экране */
+.card.prep-card {
+  flex: 1 1 0;
+  width: auto;
+  min-width: 0;
+  max-width: 160px;
+  height: 200px;
+}
+.card-badge-free {
+  position: absolute; top: 6px; left: 6px;
+  background: var(--accent2); color: #fff;
+  font-size: 11px; font-weight: 700;
+  border-radius: 8px; padding: 2px 7px;
+  z-index: 3;
+}
+#detail-confirm { margin-top: 12px; }
 .lead { color: var(--muted); max-width: 280px; margin: 0; }
 
 /* ---- end screen table ---- */
@@ -139,6 +165,7 @@ h1 { font-size: 34px; margin: 0; letter-spacing: 1px; }
   padding: 8px 10px;
   box-shadow: var(--shadow);
   min-height: 186px;
+  flex-shrink: 0;
 }
 .strip-label {
   font-size: 11px;
@@ -181,6 +208,7 @@ h1 { font-size: 34px; margin: 0; letter-spacing: 1px; }
   font-size: 22px;
   font-weight: 800;
   min-height: 32px;
+  flex-shrink: 0;
 }
 .energy #energy-val { color: var(--accent); }
 #game-footer {
@@ -191,6 +219,7 @@ h1 { font-size: 34px; margin: 0; letter-spacing: 1px; }
   font-size: 14px;
   color: var(--muted);
   min-height: 52px;
+  flex-shrink: 0;
 }
 
 /* ---- пивная кружка: остаток колоды ---- */
@@ -268,7 +297,7 @@ h1 { font-size: 34px; margin: 0; letter-spacing: 1px; }
   flex: 0 0 auto;
   display: flex;
   flex-direction: column;
-  border: 1px solid rgba(0,0,0,0.04);
+  border: 1px solid rgba(0,0,0,0.06);
   -webkit-user-select: none;
   user-select: none;
 }
@@ -294,6 +323,11 @@ h1 { font-size: 34px; margin: 0; letter-spacing: 1px; }
   justify-content: center;
   font-size: 40px;
   overflow: hidden;
+}
+.card-effect-bar {
+  font-size: 16px;
+  line-height: 1.2;
+  letter-spacing: 2px;
 }
 .card.compact .card-img { height: 70px; font-size: 32px; }
 .card.detail .card-img { height: 130px; font-size: 56px; }
@@ -330,6 +364,19 @@ h1 { font-size: 34px; margin: 0; letter-spacing: 1px; }
 .card.activatable { cursor: pointer; outline: 2px dashed var(--accent2); }
 .card.clickable { cursor: pointer; }
 
+/* ---- негативные карты: угрозы (↑) и авто (↓) ---- */
+.card.neg { border-top: 3px solid var(--threat); }
+.card.neg::before {
+  content: "Угроза";
+  position: absolute; top: 0; left: 0; right: 0;
+  background: var(--threat); color: #fff;
+  font-size: 10px; font-weight: 700; text-align: center;
+  padding: 1px 0; letter-spacing: .5px;
+  z-index: 2;
+}
+.card.neg.auto { border-top-color: var(--accent); }
+.card.neg.auto::before { content: "Авто"; background: var(--accent); }
+
 /* ---- рубашка карты (фон центра в фазе активации / перед взятием) ---- */
 .card-back {
   width: 240px;
@@ -345,8 +392,8 @@ h1 { font-size: 34px; margin: 0; letter-spacing: 1px; }
   align-items: center;
   justify-content: center;
   gap: 10px;
-  border: 3px solid rgba(255,233,199,0.35);
-  box-shadow: inset 0 0 0 6px rgba(255,233,199,0.10), 0 10px 24px rgba(40,20,30,0.30);
+  border: 2px solid rgba(255,233,199,0.35);
+  box-shadow: 0 6px 16px rgba(40,20,30,0.25);
 }
 .card-back .back-emblem {
   font-size: 54px;
@@ -429,3 +476,18 @@ body.phase-activate .card.activatable {
 #center-card.dragging { transition: none; cursor: grabbing; }
 
 .hint { color: var(--muted); font-size: 14px; text-align: center; margin: 0; }
+.detail-hint {
+  margin-top: 10px; padding: 8px 10px;
+  background: rgba(224,122,63,0.12); color: var(--ink);
+  border-radius: 10px; font-size: 13px; line-height: 1.3;
+}
+
+/* ---- низкая высота: центральная карта не перекрывает энергию ---- */
+@media (max-height: 680px) {
+  .card.detail { width: 200px; height: 248px; }
+  .card.detail .card-img { height: 104px; }
+  .card-back { width: 200px; height: 248px; }
+  .card-back .back-emblem { font-size: 44px; }
+  #center-area { gap: 8px; }
+  .strip { min-height: 150px; }
+}

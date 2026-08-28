@@ -1,12 +1,16 @@
 // Классический скрипт (работает и с file://). Данные/движок — через глобалы,
 // выставленные cards.js и engine.js. Тело обёрнуто в IIFE, чтобы локальные
 // const не конфликтовали с глобальными именами из cards.js / engine.js.
+//
+// UI-слой тонкий: рендер DOM, анимации, ввод пальцем и тайминги. Логика фаз
+// хода живёт в TurnController (turnController.js) — чистый автомат, который
+// мы дёргаем через инъектированные колбэки.
 (() => {
-const { cards } = globalThis;
 const {
   createGame, setup, getScore, getState, activate,
   runTurnStart, getTopCard, resolveTop, deriveThreatBreakdown, deriveScoreBreakdown,
-  isThreat, matches, conditionMet, deriveAsleepSet, isPerson, isBuyFree, cloneCard,
+  deriveThreatCount, isThreat, matches, conditionMet, deriveAsleepSet, isPerson, isBuyFree,
+  createTurnController, buildDeck, enableGesture, disableGesture,
 } = globalThis.Convivium;
 
 // ---------------------------------------------------------------------------
@@ -36,13 +40,6 @@ const TAG_ICON = { guitarist: '🎸', man: '👨', woman: '👩', place: '📍' 
 const $ = (id) => document.getElementById(id);
 const wait = (ms) => new Promise((r) => setTimeout(r, ms));
 
-function shuffle(a) {
-  for (let i = a.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1));
-    [a[i], a[j]] = [a[j], a[i]];
-  }
-  return a;
-}
 function vpStars(vp) {
   const n = Math.abs(vp);
   if (n === 0) return '';
@@ -51,35 +48,15 @@ function vpStars(vp) {
 }
 
 // ---------------------------------------------------------------------------
-// Сборка колоды (фиксированный дефолт сложности)
+// UI-состояние (только то, что про DOM/тайминги — фазы живут в контроллере)
 // ---------------------------------------------------------------------------
-function buildDeck() {
-  const all = cards.map(cloneCard);
-  const obhod = all.find((c) => c.name === 'Обход');
-  const harmful = all.filter((c) => isThreat(c) || c.arrow === 'down');  // Угрозы + автокарты (стрелка вниз), без Обхода
-  const rest = all.filter((c) => c.name !== 'Обход' && !harmful.includes(c));
-  shuffle(rest);
-  const prep3 = rest.splice(0, 3);            // открытые 3 для подготовки
-  const extra = shuffle(harmful).slice(0, 3);  // 3 случайных вредных (угрозы или автокарты)
-  const injected = [obhod, ...extra];  // Обход + 3 случайных вредных обратно в колоду
-  for (const t of injected) {
-    const idx = Math.floor(Math.random() * (rest.length + 1));
-    rest.splice(idx, 0, t);
-  }
-  return [...prep3, ...rest];
-}
-
-// ---------------------------------------------------------------------------
-// Состояние UI
-// ---------------------------------------------------------------------------
-let game = null;
-let topCard = null;
 let busy = false;
-let currentCanBuy = false;
 let autoTimer = null;
-let inActivatePhase = false;
 let logEntries = [];
 let deckTotal = null;
+let tc = null;
+
+const clearAutoTimer = () => { if (autoTimer) { clearTimeout(autoTimer); autoTimer = null; } };
 
 const setScreen = (name) => {
   for (const s of ['start', 'prep', 'game', 'end']) {
@@ -179,10 +156,10 @@ function renderCardEl(card, { compact = false, detail = false } = {}) {
 
 function stripCardEl(c) {
   const el = renderCardEl(c, { compact: true });
-  if (inActivatePhase && c.cost === '🔄' && !c.asleep) {
+  if (tc.state.phase === 'activate' && tc.state.activatable.has(c)) {
     el.classList.add('activatable');
     el.title = 'Активировать';
-    el.onclick = () => onActivate(c.name);
+    el.onclick = () => tc.activate(c.name);
   } else {
     el.classList.add('clickable');
     el.onclick = () => openDetail(c);
@@ -191,7 +168,12 @@ function stripCardEl(c) {
 }
 
 function render() {
-  const s = getState(game);
+  const s = getState(tc.state.game);
+  const screen = tc.state.phase === 'prep' ? 'prep'
+    : tc.state.phase === 'gameover' ? 'end' : 'game';
+  setScreen(screen);
+  document.body.classList.toggle('phase-activate', tc.state.phase === 'activate');
+
   $('energy-val').textContent = s.energy;
   if (deckTotal == null) deckTotal = s.deck.length;
   const frac = Math.max(0, Math.min(1, s.deck.length / deckTotal));
@@ -204,6 +186,8 @@ function render() {
   for (const c of s.threat) tw.appendChild(stripCardEl(c));
   const hw = $('home-cards'); hw.innerHTML = '';
   for (const c of s.home) hw.appendChild(stripCardEl(c));
+
+  if (tc.state.phase === 'take' || tc.state.phase === 'activate') showTakePhaseUI();
 }
 
 function updateBeerGlass(frac, count) {
@@ -237,42 +221,28 @@ function renderCenterBack() {
 
 // 3D-переворот рубашки → лицо верхней карты колоды.
 function flipReveal(card) {
-  const wrap = $('center-card');
-  wrap.className = '';
-  wrap.innerHTML = '';
-  const flip = document.createElement('div');
-  flip.className = 'flip';
-  flip.appendChild(renderCardBack());
-  wrap.appendChild(flip);
+  return new Promise((resolve) => {
+    const wrap = $('center-card');
+    wrap.className = '';
+    wrap.innerHTML = '';
+    const flip = document.createElement('div');
+    flip.className = 'flip';
+    flip.appendChild(renderCardBack());
+    wrap.appendChild(flip);
 
-  requestAnimationFrame(() => { flip.style.transform = 'rotateY(90deg)'; });
-  setTimeout(() => {
-    flip.innerHTML = '';
-    flip.appendChild(renderCardEl(card, { detail: true }));
-    flip.style.transition = 'none';
-    flip.style.transform = 'rotateY(-90deg)';
-    requestAnimationFrame(() => {
-      flip.style.transition = '';
-      flip.style.transform = 'rotateY(0deg)';
-    });
-  }, 270);
-  setTimeout(() => { busy = false; enableDecision(card); }, 580);
-}
-
-// Единая точка взятия карты (флип-переход) для всех ходов.
-function drawAndReveal() {
-  if (busy) return;
-  if (game.status !== 'playing') { endGame(); return; }
-  busy = true;
-  disableSwipe();
-  inActivatePhase = false;
-  document.body.classList.remove('phase-activate');
-  const buy = $('btn-buy');
-  buy.querySelector('.lbl').textContent = 'Купить';
-  $('buy-e').style.display = '';
-  $('center-card').classList.remove('hidden');
-  topCard = getTopCard(game);          // peek, без мутации колоды
-  flipReveal(topCard);
+    requestAnimationFrame(() => { flip.style.transform = 'rotateY(90deg)'; });
+    setTimeout(() => {
+      flip.innerHTML = '';
+      flip.appendChild(renderCardEl(card, { detail: true }));
+      flip.style.transition = 'none';
+      flip.style.transform = 'rotateY(-90deg)';
+      requestAnimationFrame(() => {
+        flip.style.transition = '';
+        flip.style.transform = 'rotateY(0deg)';
+      });
+    }, 270);
+    setTimeout(() => { resolve(); }, 580);
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -280,58 +250,44 @@ function drawAndReveal() {
 // ---------------------------------------------------------------------------
 function goPrep() {
   setScreen('prep');
-  const top3 = game.deck.slice(0, 3);
+  const top3 = tc.state.game.deck.slice(0, 3);
   const row = $('prep-cards');
   row.innerHTML = '';
   for (const c of top3) {
     const el = renderCardEl(c);
     el.classList.add('clickable');
-    el.onclick = () => choosePrep(c);
+    el.onclick = () => choosePrepUI(c);
     row.appendChild(el);
   }
 }
 
-async function choosePrep(card) {
+async function choosePrepUI(card) {
   if (busy) return;
   busy = true;
-  game = await setup(game, { choose: (opts) => opts.find((c) => c.name === card.name) || opts[0] });
-  const placed = game.home[0];
-  pushLog((placed ? 'В Доме: ' : 'Сброс: ') + card.name);
+  await tc.choosePrep(card.name);
   busy = false;
-  setScreen('game');
-  startTurn();
 }
 
 // ---------------------------------------------------------------------------
-// Игровой цикл
+// Взятие карты (флип-переход) — вызывается свайпом/кнопкой
 // ---------------------------------------------------------------------------
-async function startTurn() {
-  if (game.status !== 'playing') { endGame(); return; }
-  game = runTurnStart(game);                 // накопление Палёного и пр.
-  render();
-  if (game.deck.length === 0) { game.status = 'won'; endGame(); return; }
-
-  // Перед взятием карты центр всегда покоится на рубашке; игрок берёт карту
-  // свайпом вправо / кнопкой «Взять» (флип-переход). Если есть 🔄-эффекты —
-  // это фаза активации (подсветка и тап по 🔄 в лентах).
-  const activatable = collectActivatable();
-  if (activatable.length > 0) {
-    inActivatePhase = true;
-    document.body.classList.add('phase-activate');
-    pushLog('Фаза активации: примени эффекты 🔄 или бери карту');
-  } else {
-    inActivatePhase = false;
-  }
-  showTakePhase();
+async function drawAndReveal() {
+  if (busy) return;
+  if (tc.state.game.status !== 'playing') { endGame(); return; }
+  busy = true;
+  disableSwipe();
+  document.body.classList.remove('phase-activate');
+  const buy = $('btn-buy');
+  buy.querySelector('.lbl').textContent = 'Купить';
+  $('buy-e').style.display = '';
+  $('center-card').classList.remove('hidden');
+  const card = tc.take();          // peek, переход в 'reveal', рендер рубашки
+  await flipReveal(card);
+  busy = false;
+  enableDecisionUI(card);
 }
 
-// 🔄-карты, готовые к активации (находятся в игре: Дом или Угрозы).
-function collectActivatable() {
-  const asleep = deriveAsleepSet(game);
-  return [...game.home, ...game.threat].filter((c) => c.cost === '🔄' && !asleep.has(c));
-}
-
-function showTakePhase() {
+function showTakePhaseUI() {
   renderCenterBack();
   $('center-card').classList.remove('hidden');
 
@@ -342,70 +298,50 @@ function showTakePhase() {
   $('buy-e').style.display = 'none';
   buy.onclick = drawAndReveal;
 
-  enableSwipeActivation();
+  enableGesture($('center-card'), {
+    threshold: 60,
+    decide: (dx) => (dx > 60 ? 'take' : null),
+    perform: () => drawAndReveal(),
+    onStart: clearAutoTimer,
+  });
   $('play-info').textContent = '';
-
-  render();
 }
 
-function enableSwipeActivation() {
-  const el = $('center-card');
-  let startX = null, dx = 0;
-  el.onpointerdown = (e) => {
-    if (autoTimer) { clearTimeout(autoTimer); autoTimer = null; }
-    startX = e.clientX; dx = 0;
-    el.setPointerCapture(e.pointerId);
-    el.classList.add('dragging');
-    if (e.cancelable) e.preventDefault();
-  };
-  el.onpointermove = (e) => {
-    if (startX == null) return;
-    dx = e.clientX - startX;
-    el.style.transform = `translateX(${dx}px) rotate(${dx / 22}deg)`;
-    if (e.cancelable) e.preventDefault();
-  };
-  el.onpointerup = (e) => {
-    if (startX == null) return;
-    el.classList.remove('dragging');
-    const decided = dx > 60 ? 'take' : null;
-    el.style.transform = '';
-    startX = null;
-    if (decided) drawAndReveal();
-  };
-  el.onpointercancel = () => {
-    if (autoTimer) { clearTimeout(autoTimer); autoTimer = null; }
-    startX = null; el.classList.remove('dragging'); el.style.transform = '';
-  };
-}
 
-function enableDecision(card) {
+
+function enableDecisionUI(card) {
   if (autoTimer) { clearTimeout(autoTimer); autoTimer = null; }
   disableSwipe();
   hideArrows();
 
-  if (card.arrow) {                   // стрелка — авто без выбора
+  const a = tc.assess();
+  if (a.arrow) {                   // стрелка — авто без выбора
     updatePlayInfo(card);
-    setTimeout(() => resolveAndAnimate(card, null), 720);
+    setTimeout(() => submitDecision(null), 720);
     return;
   }
-  currentCanBuy = game.energy >= 2 || isBuyFree(game, card);
-  if (!currentCanBuy) {              // выбор только один — сброс (авто-фолбэк)
-    autoTimer = setTimeout(() => resolveAndAnimate(card, 'discard'), 600);
+  if (!a.canBuy) {                 // выбор только один — сброс (авто-фолбэк)
+    autoTimer = setTimeout(() => submitDecision('discard'), 600);
   }
-  enableSwipe(card);
-  showActions(currentCanBuy);
+  enableGesture($('center-card'), {
+    threshold: 60,
+    decide: (dx) => (dx < -60 ? 'discard' : (dx > 60 && tc.state.canBuy ? 'buy' : null)),
+    perform: (action) => submitDecision(action),
+    onStart: clearAutoTimer,
+  });
+  showActions(a.canBuy);
 }
 
 function showActions(canBuy) {
   $('play-info').textContent = '';
   const buyE = $('buy-e');
-    if (buyE) buyE.innerHTML = isBuyFree(game, topCard)
+  if (buyE) buyE.innerHTML = isBuyFree(tc.state.game, tc.state.topCard)
     ? '<span class="pos">0⚡</span>'
     : '<span class="neg">−2⚡</span>';
   $('btn-discard').classList.remove('hidden');
   $('btn-buy').classList.toggle('hidden', !canBuy);
-  $('btn-discard').onclick = () => resolveAndAnimate(topCard, 'discard');
-  $('btn-buy').onclick = () => resolveAndAnimate(topCard, 'buy');
+  $('btn-discard').onclick = () => submitDecision('discard');
+  $('btn-buy').onclick = () => submitDecision('buy');
 }
 
 function updatePlayInfo(card) {
@@ -416,7 +352,7 @@ function updatePlayInfo(card) {
   } else if (card.arrow === 'down') {
     info.innerHTML = '<span class="down">⬇ Авто</span> — сразу в Дом';
   } else {
-      const buyE = isBuyFree(game, card) ? '<span class="pos">0⚡</span>' : '<span class="neg">−2⚡</span>';
+    const buyE = isBuyFree(tc.state.game, card) ? '<span class="pos">0⚡</span>' : '<span class="neg">−2⚡</span>';
     info.innerHTML = 'Сброс <span class="pos">+1⚡</span> · Купить ' + buyE;
   }
 }
@@ -427,126 +363,33 @@ function flyDirection(card, action) {
   return action === 'discard' ? 'left' : 'right';
 }
 
-async function resolveAndAnimate(card, action) {
-  if (busy || !card) return;
+async function submitDecision(action) {
+  if (busy) return;
   busy = true;
-  disableSwipe();
-  hideArrows();
-
-  const dir = flyDirection(card, action);
+  const dir = flyDirection(tc.state.topCard, action);
   $('center-card').classList.add('fly-' + dir);
   await wait(420);
-
-  if (action === 'buy' && card.attach && card.attach.choose) {
-      const pool = game.home.filter((c) => matches(game, c, card.attach.match));
-    if (pool.length > 1) {
-      const chosen = await chooseFromPersons(card.attach.match);
-      if (chosen === null) { busy = false; return; }
-      game.choose = () => chosen;
-    }
-  }
-
-  game = resolveTop(game, action);
-  game.choose = (opts) => opts[0];
-  logResolve(card, action);
-  render();
-
+  const progressed = await tc.decide(action);
   busy = false;
-  if (game.status !== 'playing') { endGame(); return; }
-  startTurn();
-}
-
-function logResolve(card, action) {
-  if (card.arrow === 'up') pushLog('Угроза: ' + card.name);
-  else if (card.arrow === 'down') pushLog(card.name + ' → Дом');
-  else if (action === 'discard') pushLog('Сброс: ' + card.name + ' (+1⚡)');
-    else pushLog((isBuyFree(game, card) ? 'Куплено (бесплатно): ' : 'Куплено: ') + card.name + (isBuyFree(game, card) ? '' : ' (−2⚡)'));
+  if (!progressed) enableDecisionUI(tc.state.topCard);  // отмена выбора аттача
 }
 
 // ---------------------------------------------------------------------------
 // Свайп
 // ---------------------------------------------------------------------------
-function enableSwipe(card) {
-  const el = $('center-card');
-  let startX = null, dx = 0;
-  el.onpointerdown = (e) => {
-    if (autoTimer) { clearTimeout(autoTimer); autoTimer = null; }
-    startX = e.clientX; dx = 0;
-    el.setPointerCapture(e.pointerId);
-    el.classList.add('dragging');
-    if (e.cancelable) e.preventDefault();
-  };
-  el.onpointermove = (e) => {
-    if (startX == null) return;
-    dx = e.clientX - startX;
-    el.style.transform = `translateX(${dx}px) rotate(${dx / 22}deg)`;
-    if (e.cancelable) e.preventDefault();
-  };
-  el.onpointerup = (e) => {
-    if (startX == null) return;
-    el.classList.remove('dragging');
-    const decided = dx < -60 ? 'discard' : (dx > 60 && currentCanBuy ? 'buy' : null);
-    el.style.transform = '';
-    startX = null;
-    if (decided) resolveAndAnimate(card, decided);
-  };
-  el.onpointercancel = () => {
-    if (autoTimer) { clearTimeout(autoTimer); autoTimer = null; }
-    startX = null; el.classList.remove('dragging'); el.style.transform = '';
-  };
-}
 function disableSwipe() {
-  const el = $('center-card');
-  el.onpointerdown = el.onpointermove = el.onpointerup = el.onpointercancel = null;
+  disableGesture($('center-card'));
 }
 
 // ---------------------------------------------------------------------------
-// Активация 🔄
+// Оверлеи выбора — реализация инъектированного promptChoice контроллера
 // ---------------------------------------------------------------------------
-async function onActivate(cardName) {
-  if (busy || game.status !== 'playing') return;
-  if (!inActivatePhase) return;
-  const card = [...game.home, ...game.threat].find((c) => c.name === cardName && c.cost === '🔄');
-  if (!card) return;
-    if (deriveAsleepSet(game).has(card)) return; // спящая карта не активируется
-
-  const needsTarget = (card.activate || []).some((e) => e.op === 'discardTarget');
-  const needsReorder = (card.activate || []).some((e) => e.op === 'peekReorder');
-  busy = true;
-  let chosen = null;
-  if (needsTarget) {
-    chosen = await chooseFromThreats();
-    if (chosen === null) { busy = false; return; }
-    game.choose = () => chosen;
-  }
-  if (needsReorder) {
-    const op = (card.activate || []).find((e) => e.op === 'peekReorder');
-    const ordered = await reorderDeck(op.count || 3);
-    game.reorder = (top) => ordered;
-  }
-  const before = game;
-  game = activate(game, cardName);
-  if (game === before) { // активация не сработала (нет в игре / спит)
-    busy = false;
-    return;
-  }
-  game.choose = (opts) => opts[0];
-  game.reorder = (top) => top;
-  pushLog('Активировано: ' + cardName);
-  if (collectActivatable().length === 0) {
-    inActivatePhase = false;
-    document.body.classList.remove('phase-activate');
-  }
-  render();
-  busy = false;
-}
-
 function chooseFromThreats() {
   return new Promise((resolve) => {
     const ov = $('choice-overlay');
     const list = $('choice-cards');
     list.innerHTML = '';
-    const threats = game.threat.slice();
+    const threats = tc.state.game.threat.slice();
     if (threats.length === 0) { resolve(null); return; }
     $('choice-title').textContent = 'Выбери угрозу';
     for (const t of threats) {
@@ -564,7 +407,7 @@ function chooseFromPersons(match) {
     const ov = $('choice-overlay');
     const list = $('choice-cards');
     list.innerHTML = '';
-    const persons = game.home.filter((c) => matches(game, c, match || {}));
+    const persons = tc.state.game.home.filter((c) => matches(tc.state.game, c, match || {}));
     if (persons.length === 0) { resolve(null); return; }
     $('choice-title').textContent = 'Подложить под кого?';
     for (const p of persons) {
@@ -578,9 +421,9 @@ function chooseFromPersons(match) {
 }
 
 async function reorderDeck(count) {
-  const n = Math.min(count || 0, game.deck.length);
+  const n = Math.min(count || 0, tc.state.game.deck.length);
   if (n < 1) return [];
-  const working = game.deck.slice(0, n);
+  const working = tc.state.game.deck.slice(0, n);
   const ordered = [];
   await new Promise((resolve) => {
     const ov = $('choice-overlay');
@@ -610,8 +453,15 @@ async function reorderDeck(count) {
   return ordered;
 }
 
+async function promptChoiceAdapter(payload) {
+  if (payload.kind === 'threats') return chooseFromThreats();
+  if (payload.kind === 'persons') return chooseFromPersons(payload.match);
+  if (payload.kind === 'reorder') return reorderDeck(payload.count);
+  return null;
+}
+
 // ---------------------------------------------------------------------------
-// Оверлеи
+// Оверлеи деталей/сброса
 // ---------------------------------------------------------------------------
 function openDetail(c) {
   const d = $('detail-card');
@@ -630,7 +480,7 @@ function openDetail(c) {
 function openDiscard() {
   const grid = $('discard-cards');
   grid.innerHTML = '';
-  const s = getState(game);
+  const s = getState(tc.state.game);
   if (s.discard.length === 0) {
     const p = document.createElement('p');
     p.className = 'hint';
@@ -649,11 +499,11 @@ function openDiscard() {
 // ---------------------------------------------------------------------------
 function endGame() {
   setScreen('end');
-  const won = game.status === 'won';
-  const s = getState(game);
+  const won = tc.state.game.status === 'won';
+  const s = getState(tc.state.game);
   $('end-emoji').textContent = won ? '🎉' : '🤢';
   $('end-title').textContent = won ? 'Победа!' : 'Поражение';
-  $('end-score').textContent = 'Очки: ' + getScore(game);
+  $('end-score').textContent = 'Очки: ' + getScore(tc.state.game);
   $('end-sub').textContent = won
     ? 'Ура, твою вечеринку запомнят надолго!'
     : 'Лучше такое не вспоминать...';
@@ -661,10 +511,10 @@ function endGame() {
   const table = $('end-table');
   table.innerHTML = '';
   if (won) {
-    renderEndTable(table, 'Очки', deriveScoreBreakdown(game), getScore(game));
+    renderEndTable(table, 'Очки', deriveScoreBreakdown(tc.state.game), getScore(tc.state.game));
   } else {
-    const rows = deriveThreatBreakdown(game).map((r) => ({ card: r.card, value: r.weight }));
-    renderEndTable(table, 'Угроза', rows, deriveThreatCount(game));
+    const rows = deriveThreatBreakdown(tc.state.game).map((r) => ({ card: r.card, value: r.weight }));
+    renderEndTable(table, 'Угроза', rows, deriveThreatCount(tc.state.game));
   }
 }
 
@@ -704,16 +554,19 @@ function renderEndTable(container, valLabel, rows, total) {
 // Запуск
 // ---------------------------------------------------------------------------
 function newGame() {
-  game = createGame({ deck: buildDeck() });
   logEntries = [];
   busy = false;
   deckTotal = null;
+  autoTimer = null;
+  tc.newSession(buildDeck());
   goPrep();
 }
 
 // ---------------------------------------------------------------------------
 // Привязка событий
 // ---------------------------------------------------------------------------
+tc = createTurnController({ render, log: pushLog, promptChoice: promptChoiceAdapter });
+
 $('btn-start').onclick = newGame;
 $('btn-again').onclick = newGame;
 $('game-header').onclick = () => $('log-drawer').classList.toggle('hidden');

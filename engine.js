@@ -639,10 +639,32 @@ function shuffle(arr, rng) {
   }
 }
 
+// Сборка колоды (композиция сложности) — правило, а не UI.
+// all карты клонируются; prep карт открываются для подготовки;
+// «Обход» + N случайных вредных (угроза/авто) инъектируются обратно в колоду.
+function buildDeck(opts = {}, rng = Math.random) {
+  const { prep = 3, harmful = 3, withObhod = true } = opts;
+  const all = (globalThis.cards || []).map(cloneCard);
+  const obhod = withObhod ? all.find((c) => c.name === 'Обход') : null;
+  const harmfulCards = all.filter((c) => isThreat(c) || c.arrow === 'down');
+  const rest = all.filter((c) => c.name !== 'Обход' && !harmfulCards.includes(c));
+  shuffle(rest, rng);
+  const prepN = rest.splice(0, prep);
+  const extraArr = harmfulCards.slice();
+  shuffle(extraArr, rng);
+  const extra = extraArr.slice(0, harmful);
+  const injected = [obhod, ...extra].filter(Boolean);
+  for (const t of injected) {
+    const idx = Math.floor(rng() * (rest.length + 1));
+    rest.splice(idx, 0, t);
+  }
+  return [...prepN, ...rest];
+}
+
 // --- экспорт ---------------------------------------------------------------
 
 globalThis.Convivium = {
   createGame, setup, takeTurn, runTurnStart, getTopCard, resolveTop, activate, getState, getScore,
   deriveThreatCount, deriveThreatBreakdown, deriveScoreBreakdown, deriveStatus, isThreat, validateCards, checkAttachInvariant,
-  matches, conditionMet, deriveAsleepSet, isPerson, isBuyFree, cloneCard,
+  matches, conditionMet, deriveAsleepSet, isPerson, isBuyFree, cloneCard, buildDeck,
 };

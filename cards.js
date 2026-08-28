@@ -91,7 +91,7 @@ const cards = [
     arrow: 'down',
     effects: [
       { when: 'enter', op: 'replace', match: { name: 'Паша' }, in: 'home' },
-      { when: 'enter', op: 'pullReserve', count: 1, filter: { threat: true } },
+      { when: 'enter', op: 'pullReserve' },
     ],
   },
   {

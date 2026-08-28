@@ -6,6 +6,7 @@ const { cards } = globalThis;
 const {
   createGame, setup, getScore, getState, activate,
   runTurnStart, getTopCard, resolveTop, deriveThreatBreakdown, deriveScoreBreakdown,
+  isThreat, matches, conditionMet, deriveAsleepSet, isPerson, isBuyFree, cloneCard,
 } = globalThis.Convivium;
 
 // ---------------------------------------------------------------------------
@@ -42,34 +43,6 @@ function shuffle(a) {
   }
   return a;
 }
-function cloneCard(c) {
-  const clone = { ...c };
-  if (c.tags) clone.tags = [...c.tags];
-  if (c.effects) clone.effects = c.effects.map((e) => ({ ...e }));
-  if (c.activate) clone.activate = c.activate.map((e) => ({ ...e }));
-  if (c.attach) clone.attach = { ...c.attach };
-  return clone;
-}
-const isThreatTemplate = (c) => c.arrow === 'up' && c.threat !== false;
-const isThreatCard = (c) => c.arrow === 'up' && c.threat !== false;
-
-function isPerson(c) { return !!(c.tags && (c.tags.includes('man') || c.tags.includes('woman'))); }
-function matches(card, m) {
-  if (!m) return true;
-  if (m.name && card.name !== m.name) return false;
-  if (m.tags && !m.tags.every((t) => card.tags && card.tags.includes(t))) return false;
-  if (m.person && !isPerson(card)) return false;
-  return true;
-}
-function conditionMet(cond) {
-  if (!cond) return true;
-  const ip = [...game.home, ...game.threat];
-  if (cond.name) return ip.some((c) => c.name === cond.name);
-  if (cond.tags) return ip.some((c) => cond.tags.every((t) => c.tags && c.tags.includes(t)));
-  return true;
-}
-const isBuyFree = (card) => (card.effects || []).some((e) => e.op === 'buyFreeIf' && conditionMet(e.match));
-
 function vpStars(vp) {
   const n = Math.abs(vp);
   if (n === 0) return '';
@@ -83,7 +56,7 @@ function vpStars(vp) {
 function buildDeck() {
   const all = cards.map(cloneCard);
   const obhod = all.find((c) => c.name === 'Обход');
-  const harmful = all.filter((c) => isThreatTemplate(c) || c.arrow === 'down');  // Угрозы + автокарты (стрелка вниз), без Обхода
+  const harmful = all.filter((c) => isThreat(c) || c.arrow === 'down');  // Угрозы + автокарты (стрелка вниз), без Обхода
   const rest = all.filter((c) => c.name !== 'Обход' && !harmful.includes(c));
   shuffle(rest);
   const prep3 = rest.splice(0, 3);            // открытые 3 для подготовки
@@ -206,7 +179,7 @@ function renderCardEl(card, { compact = false, detail = false } = {}) {
 
 function stripCardEl(c) {
   const el = renderCardEl(c, { compact: true });
-  if (inActivatePhase && c.cost === '🔄') {
+  if (inActivatePhase && c.cost === '🔄' && !c.asleep) {
     el.classList.add('activatable');
     el.title = 'Активировать';
     el.onclick = () => onActivate(c.name);
@@ -224,7 +197,7 @@ function render() {
   const frac = Math.max(0, Math.min(1, s.deck.length / deckTotal));
   updateBeerGlass(frac, s.deck.length);
 
-  const realThreats = s.threat.filter(isThreatCard).length;
+  const realThreats = s.threat.filter(isThreat).length;
   $('threat-strip').classList.toggle('warn', realThreats >= 3);
 
   const tw = $('threat-cards'); tw.innerHTML = '';
@@ -354,7 +327,8 @@ async function startTurn() {
 
 // 🔄-карты, готовые к активации (находятся в игре: Дом или Угрозы).
 function collectActivatable() {
-  return [...game.home, ...game.threat].filter((c) => c.cost === '🔄');
+  const asleep = deriveAsleepSet(game);
+  return [...game.home, ...game.threat].filter((c) => c.cost === '🔄' && !asleep.has(c));
 }
 
 function showTakePhase() {
@@ -414,7 +388,7 @@ function enableDecision(card) {
     setTimeout(() => resolveAndAnimate(card, null), 720);
     return;
   }
-  currentCanBuy = game.energy >= 2 || isBuyFree(card);
+  currentCanBuy = game.energy >= 2 || isBuyFree(game, card);
   if (!currentCanBuy) {              // выбор только один — сброс (авто-фолбэк)
     autoTimer = setTimeout(() => resolveAndAnimate(card, 'discard'), 600);
   }
@@ -425,7 +399,7 @@ function enableDecision(card) {
 function showActions(canBuy) {
   $('play-info').textContent = '';
   const buyE = $('buy-e');
-  if (buyE) buyE.innerHTML = isBuyFree(topCard)
+    if (buyE) buyE.innerHTML = isBuyFree(game, topCard)
     ? '<span class="pos">0⚡</span>'
     : '<span class="neg">−2⚡</span>';
   $('btn-discard').classList.remove('hidden');
@@ -442,7 +416,7 @@ function updatePlayInfo(card) {
   } else if (card.arrow === 'down') {
     info.innerHTML = '<span class="down">⬇ Авто</span> — сразу в Дом';
   } else {
-    const buyE = isBuyFree(card) ? '<span class="pos">0⚡</span>' : '<span class="neg">−2⚡</span>';
+      const buyE = isBuyFree(game, card) ? '<span class="pos">0⚡</span>' : '<span class="neg">−2⚡</span>';
     info.innerHTML = 'Сброс <span class="pos">+1⚡</span> · Купить ' + buyE;
   }
 }
@@ -464,7 +438,7 @@ async function resolveAndAnimate(card, action) {
   await wait(420);
 
   if (action === 'buy' && card.attach && card.attach.choose) {
-    const pool = game.home.filter((c) => matches(c, card.attach.match));
+      const pool = game.home.filter((c) => matches(game, c, card.attach.match));
     if (pool.length > 1) {
       const chosen = await chooseFromPersons(card.attach.match);
       if (chosen === null) { busy = false; return; }
@@ -486,7 +460,7 @@ function logResolve(card, action) {
   if (card.arrow === 'up') pushLog('Угроза: ' + card.name);
   else if (card.arrow === 'down') pushLog(card.name + ' → Дом');
   else if (action === 'discard') pushLog('Сброс: ' + card.name + ' (+1⚡)');
-  else pushLog((isBuyFree(card) ? 'Куплено (бесплатно): ' : 'Куплено: ') + card.name + (isBuyFree(card) ? '' : ' (−2⚡)'));
+    else pushLog((isBuyFree(game, card) ? 'Куплено (бесплатно): ' : 'Куплено: ') + card.name + (isBuyFree(game, card) ? '' : ' (−2⚡)'));
 }
 
 // ---------------------------------------------------------------------------
@@ -534,6 +508,7 @@ async function onActivate(cardName) {
   if (!inActivatePhase) return;
   const card = [...game.home, ...game.threat].find((c) => c.name === cardName && c.cost === '🔄');
   if (!card) return;
+    if (deriveAsleepSet(game).has(card)) return; // спящая карта не активируется
 
   const needsTarget = (card.activate || []).some((e) => e.op === 'discardTarget');
   const needsReorder = (card.activate || []).some((e) => e.op === 'peekReorder');
@@ -546,10 +521,17 @@ async function onActivate(cardName) {
   }
   if (needsReorder) {
     const op = (card.activate || []).find((e) => e.op === 'peekReorder');
-    await reorderDeck(op.count || 3);
+    const ordered = await reorderDeck(op.count || 3);
+    game.reorder = (top) => ordered;
   }
+  const before = game;
   game = activate(game, cardName);
+  if (game === before) { // активация не сработала (нет в игре / спит)
+    busy = false;
+    return;
+  }
   game.choose = (opts) => opts[0];
+  game.reorder = (top) => top;
   pushLog('Активировано: ' + cardName);
   if (collectActivatable().length === 0) {
     inActivatePhase = false;
@@ -582,7 +564,7 @@ function chooseFromPersons(match) {
     const ov = $('choice-overlay');
     const list = $('choice-cards');
     list.innerHTML = '';
-    const persons = game.home.filter((c) => matches(c, match || {}));
+    const persons = game.home.filter((c) => matches(game, c, match || {}));
     if (persons.length === 0) { resolve(null); return; }
     $('choice-title').textContent = 'Подложить под кого?';
     for (const p of persons) {
@@ -597,7 +579,7 @@ function chooseFromPersons(match) {
 
 async function reorderDeck(count) {
   const n = Math.min(count || 0, game.deck.length);
-  if (n < 1) return;
+  if (n < 1) return [];
   const working = game.deck.slice(0, n);
   const ordered = [];
   await new Promise((resolve) => {
@@ -625,7 +607,7 @@ async function reorderDeck(count) {
     render();
     ov.classList.remove('hidden');
   });
-  game.deck.splice(0, n, ...ordered);
+  return ordered;
 }
 
 // ---------------------------------------------------------------------------

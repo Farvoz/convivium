@@ -10,12 +10,120 @@
 
 const CARDS = globalThis.cards;
 
-// --- категории примитивов DSL ---------------------------------------------
-const ACTION_OPS = ['replace', 'pullReserve', 'accumulate', 'discardTarget', 'peekReorder'];
-const DERIVE_OPS = ['modifyVp', 'addVp', 'bonusVp', 'scorePerPerson'];
-const COND_OPS = ['buyFreeIf'];
-const ALL_OPS = [...ACTION_OPS, ...DERIVE_OPS, ...COND_OPS];
+// --- фазы хода ------------------------------------------------------------
 const PHASES = ['enter', 'turnStart', 'turnEnd'];
+
+// --- реестр примитивов DSL ------------------------------------------------
+// Глубокий модуль: один источник истины про каждый op. `kind` заменяет
+// ACTION/DERIVE/COND_OPS; `when` — фазу исполнения action-опа (для derive/cond
+// не задаётся); `phaseable` разрешает поле `when` в эффектах; `validate` и
+// `run` переносят ветки из бывших switch'ей validateEffect/runAction.
+const OP_REGISTRY = {
+  replace: {
+    kind: 'action', when: 'enter', phaseable: true,
+    validate(e, where) {
+      validateMatch(e.match, where + '.replace');
+      if (!['home', 'threat'].includes(e.in)) throw new Error(`${where}: replace.in home|threat`);
+    },
+    run(game, source, e) {
+      const zone = e.in === 'threat' ? game.threat : game.home;
+      const idx = zone.findIndex((c) => matches(game, c, e.match));
+      if (idx >= 0) {
+        const [target] = zone.splice(idx, 1);
+        detachAttachments(game, target);
+        game.discard.push(target);
+      }
+    },
+  },
+  pullReserve: {
+    kind: 'action', when: 'enter', phaseable: true,
+    validate() {},
+    run(game, source, e) {
+      const t = cloneThreatTemplate(game);
+      t.faceDown = true;
+      const idx = Math.floor(game.rng() * (game.deck.length + 1));
+      game.deck.splice(idx, 0, t);
+    },
+  },
+  accumulate: {
+    kind: 'action', when: 'turnStart', phaseable: true,
+    validate(e, where) { if (typeof e.max !== 'number') throw new Error(`${where}: accumulate.max number`); },
+    run(game, source, e) {
+      source.accumulated = source.accumulated || [];
+      if (source.accumulated.length < e.max && game.deck.length > 0) {
+        const taken = game.deck.shift();
+        taken.faceDown = true;
+        source.accumulated.push(taken);
+      }
+      if (source.accumulated.length >= e.max) {
+        detachAttachments(game, source);
+        removeCard(game, source);
+        game.discard.push(source);
+        for (const a of source.accumulated) game.discard.push(a);
+        source.accumulated = [];
+      }
+    },
+  },
+  discardTarget: {
+    kind: 'action', when: undefined, phaseable: true,
+    validate(e, where) { validateMatch(e.filter, where + '.discardTarget'); },
+    run(game, source, e) {
+      const pool = game.threat.filter((c) => matches(game, c, e.filter || {}, 'threat'));
+      if (pool.length) {
+        const chosen = game.choose(pool);
+        detachAttachments(game, chosen);
+        removeFromZone(game.threat, chosen);
+        game.discard.push(chosen);
+      }
+    },
+  },
+  peekReorder: {
+    kind: 'action', when: undefined, phaseable: true,
+    validate(e, where) { if (typeof e.count !== 'number') throw new Error(`${where}: peekReorder.count number`); },
+    run(game, source, e) {
+      const n = Math.min(e.count || 0, game.deck.length);
+      if (n < 1) return;
+      const top = game.deck.splice(0, n);
+      const ordered = (typeof game.reorder === 'function') ? game.reorder(top) : top;
+      game.deck.unshift(...ordered);
+    },
+  },
+  modifyVp: {
+    kind: 'derive', phaseable: false,
+    validate(e, where) {
+      validateMatch(e.match, where + '.modifyVp');
+      if (typeof e.value !== 'number') throw new Error(`${where}: modifyVp.value number`);
+    },
+  },
+  addVp: {
+    kind: 'derive', phaseable: false,
+    validate(e, where) {
+      validateMatch(e.match, where + '.addVp');
+      if (typeof e.amount !== 'number') throw new Error(`${where}: addVp.amount number`);
+      validateCond(e.if, where + '.addVp.if');
+    },
+  },
+  bonusVp: {
+    kind: 'derive', phaseable: false,
+    validate(e, where) {
+      if (typeof e.amount !== 'number') throw new Error(`${where}: bonusVp.amount number`);
+      validateCond(e.if, where + '.bonusVp.if');
+    },
+  },
+  scorePerPerson: {
+    kind: 'derive', phaseable: false,
+    validate(e, where) { if (typeof e.amount !== 'number') throw new Error(`${where}: scorePerPerson.amount number`); },
+  },
+  buyFreeIf: {
+    kind: 'cond', phaseable: false,
+    validate(e, where) { validateMatch(e.match, where + '.buyFreeIf'); },
+  },
+};
+
+const ALL_OPS = Object.keys(OP_REGISTRY);
+const ACTION_OPS = ALL_OPS.filter((op) => OP_REGISTRY[op].kind === 'action');
+const DERIVE_OPS = ALL_OPS.filter((op) => OP_REGISTRY[op].kind === 'derive');
+const COND_OPS = ALL_OPS.filter((op) => OP_REGISTRY[op].kind === 'cond');
 
 // --- валидация DSL ---------------------------------------------------------
 
@@ -45,51 +153,17 @@ function validateCond(c, where) {
   }
 }
 
-function validateEffect(e, where, allowWhen) {
+function validateEffect(e, where, inActivate) {
   if (typeof e !== 'object' || e === null) throw new Error(`${where}: effect object`);
   if (typeof e.op !== 'string') throw new Error(`${where}: effect.op string`);
-  if (!ALL_OPS.includes(e.op)) throw new Error(`${where}: unknown op ${e.op}`);
+  const entry = OP_REGISTRY[e.op];
+  if (!entry) throw new Error(`${where}: unknown op ${e.op}`);
   if (e.when !== undefined) {
+    if (inActivate) throw new Error(`${where}: op ${e.op} must not have when (activate)`);
+    if (!entry.phaseable) throw new Error(`${where}: derive op ${e.op} must not have when`);
     if (!PHASES.includes(e.when)) throw new Error(`${where}: bad when ${e.when}`);
-    if (!allowWhen) throw new Error(`${where}: op ${e.op} must not have when (activate)`);
-    if (DERIVE_OPS.includes(e.op)) throw new Error(`${where}: derive op ${e.op} must not have when`);
   }
-  switch (e.op) {
-    case 'replace':
-      validateMatch(e.match, where + '.replace');
-      if (!['home', 'threat'].includes(e.in)) throw new Error(`${where}: replace.in home|threat`);
-      break;
-    case 'pullReserve':
-      break;
-    case 'accumulate':
-      if (typeof e.max !== 'number') throw new Error(`${where}: accumulate.max number`);
-      break;
-    case 'discardTarget':
-      validateMatch(e.filter, where + '.discardTarget');
-      break;
-    case 'peekReorder':
-      if (typeof e.count !== 'number') throw new Error(`${where}: peekReorder.count number`);
-      break;
-    case 'modifyVp':
-      validateMatch(e.match, where + '.modifyVp');
-      if (typeof e.value !== 'number') throw new Error(`${where}: modifyVp.value number`);
-      break;
-    case 'addVp':
-      validateMatch(e.match, where + '.addVp');
-      if (typeof e.amount !== 'number') throw new Error(`${where}: addVp.amount number`);
-      validateCond(e.if, where + '.addVp.if');
-      break;
-    case 'bonusVp':
-      if (typeof e.amount !== 'number') throw new Error(`${where}: bonusVp.amount number`);
-      validateCond(e.if, where + '.bonusVp.if');
-      break;
-    case 'scorePerPerson':
-      if (typeof e.amount !== 'number') throw new Error(`${where}: scorePerPerson.amount number`);
-      break;
-    case 'buyFreeIf':
-      validateMatch(e.match, where + '.buyFreeIf');
-      break;
-  }
+  entry.validate(e, where);
 }
 
 function validateCard(c, idx) {
@@ -122,11 +196,11 @@ function validateCard(c, idx) {
   }
   if (c.effects !== undefined) {
     if (!Array.isArray(c.effects)) throw new Error(`${where}: effects array`);
-    c.effects.forEach((e, i) => validateEffect(e, `${where}.effects[${i}]`, true));
+    c.effects.forEach((e, i) => validateEffect(e, `${where}.effects[${i}]`, false));
   }
   if (c.activate !== undefined) {
     if (!Array.isArray(c.activate)) throw new Error(`${where}: activate array`);
-    c.activate.forEach((e, i) => validateEffect(e, `${where}.activate[${i}]`, false));
+    c.activate.forEach((e, i) => validateEffect(e, `${where}.activate[${i}]`, true));
   }
 }
 
@@ -153,8 +227,12 @@ function isPerson(c) {
 function inPlayCards(game) {
   return [...game.home, ...game.threat];
 }
-function matches(card, match, zone) {
+function matches(game, card, match, zone) {
   if (!match) return true;
+  if (game) {
+    const asleep = deriveAsleepSet(game);
+    if (asleep.has(card)) return false; // спящий «пустой»: не матчится ни по имени/тегам/человеку
+  }
   if (match.zone && zone && match.zone !== zone) return false;
   if (match.name && card.name !== match.name) return false;
   if (match.tags && !match.tags.every((t) => card.tags && card.tags.includes(t))) return false;
@@ -163,7 +241,8 @@ function matches(card, match, zone) {
 }
 function conditionMet(game, cond) {
   if (!cond) return true;
-  const inPlay = inPlayCards(game);
+  const asleep = deriveAsleepSet(game);
+  const inPlay = inPlayCards(game).filter((c) => !asleep.has(c));
   if (cond.name) return inPlay.some((c) => c.name === cond.name);
   if (cond.tags) return inPlay.some((c) => cond.tags.every((t) => c.tags && c.tags.includes(t)));
   return true;
@@ -194,6 +273,7 @@ function cloneGame(g) {
     log: g.log,
     choose: g.choose,
     rng: g.rng,
+    reorder: g.reorder,
   };
 }
 
@@ -299,13 +379,6 @@ function isBuyFree(game, card) {
   return (card.effects || []).some((e) => e.op === 'buyFreeIf' && conditionMet(game, e.match));
 }
 
-function effectPhase(e) {
-  if (e.when) return e.when;
-  if (e.op === 'accumulate') return 'turnStart';
-  if (e.op === 'replace' || e.op === 'pullReserve') return 'enter';
-  return null; // activate-опы
-}
-
 function runEnterActions(g, card) {
   applyCardActions(g, card, 'enter');
   applyAttach(g, card);
@@ -313,7 +386,7 @@ function runEnterActions(g, card) {
 
 function applyAttach(g, card) {
   if (!card.attach) return;
-  const pool = g.home.filter((c) => c !== card && matches(c, card.attach.match));
+  const pool = g.home.filter((c) => c !== card && matches(g, c, card.attach.match));
   if (pool.length === 0) {
     removeFromZone(g.home, card);
     g.discard.push(card);
@@ -334,8 +407,9 @@ function applyAttach(g, card) {
 
 function applyCardActions(g, card, phase) {
   for (const e of card.effects || []) {
-    if (!ACTION_OPS.includes(e.op)) continue; // derive/cond-опы не исполняются
-    if (effectPhase(e) === phase) runAction(g, card, e);
+    const entry = OP_REGISTRY[e.op];
+    if (!entry || entry.kind !== 'action') continue; // derive/cond-опы не исполняются
+    if (entry.when === phase) entry.run(g, card, e);
   }
 }
 
@@ -343,63 +417,7 @@ function applyPhaseActions(g, phase) {
   for (const c of inPlayCards(g)) applyCardActions(g, c, phase);
 }
 
-// --- интерпретатор action-примитивов ---------------------------------------
-
-function runAction(game, source, e) {
-  switch (e.op) {
-    case 'replace': {
-      const zone = e.in === 'threat' ? game.threat : game.home;
-      const idx = zone.findIndex((c) => matches(c, e.match));
-      if (idx >= 0) {
-        const [target] = zone.splice(idx, 1);
-        detachAttachments(game, target);
-        game.discard.push(target);
-      }
-      break;
-    }
-    case 'pullReserve': {
-      const t = cloneThreatTemplate(game);
-      t.faceDown = true;
-      const idx = Math.floor(game.rng() * (game.deck.length + 1));
-      game.deck.splice(idx, 0, t);
-      break;
-    }
-    case 'accumulate': {
-      source.accumulated = source.accumulated || [];
-      if (source.accumulated.length < e.max && game.deck.length > 0) {
-        const taken = game.deck.shift();
-        taken.faceDown = true;
-        source.accumulated.push(taken);
-      }
-      if (source.accumulated.length >= e.max) {
-        detachAttachments(game, source);
-        removeCard(game, source);
-        game.discard.push(source);
-        for (const a of source.accumulated) game.discard.push(a);
-        source.accumulated = [];
-      }
-      break;
-    }
-    case 'discardTarget': {
-      const pool = game.threat.filter((c) => matches(c, e.filter || {}, 'threat'));
-      if (pool.length) {
-        const chosen = game.choose(pool);
-        detachAttachments(game, chosen);
-        removeFromZone(game.threat, chosen);
-        game.discard.push(chosen);
-      }
-      break;
-    }
-    case 'peekReorder': {
-      const n = Math.min(e.count || 0, game.deck.length);
-      const top = game.deck.splice(0, n);
-      game.deck.unshift(...top);
-      break;
-    }
-    default:
-      break;
-  }
-}
+// --- шаблон угрозы для pullReserve ----------------------------------------
 
 function cloneThreatTemplate(game) {
   const threats = CARDS.filter(isThreat);
@@ -411,13 +429,16 @@ function cloneThreatTemplate(game) {
 
 function activate(game, name) {
   if (game.status !== 'playing') return game;
+  const asleep = deriveAsleepSet(game);
   const card = [...game.home, ...game.threat].find((c) => c.name === name && c.cost === '🔄');
   if (!card) return game; // из сброса/вне игры — не работает
+  if (asleep.has(card)) return game; // спящая карта не применяет эффекты
   const g = cloneGame(game);
   const live = [...g.home, ...g.threat].find((c) => c.name === name && c.cost === '🔄');
   for (const e of live.activate || []) {
     if (e.if && !conditionMet(g, e.if)) continue;
-    runAction(g, live, e);
+    const entry = OP_REGISTRY[e.op];
+    if (entry && entry.kind === 'action') entry.run(g, live, e);
   }
   const zone = g.home.includes(live) ? g.home : g.threat;
   detachAttachments(g, live);
@@ -438,58 +459,22 @@ function deriveAsleepSet(game) {
   return set;
 }
 
-function deriveThreatCount(game) {
-  let count = 0;
-  for (const c of game.threat) {
-    if (!isThreat(c)) continue;
-    let w = 1;
-    for (const card of inPlayCards(game)) {
-      if (card.threatWeight && matches(c, card.threatWeight.match)) {
-        w = card.threatWeight.weight;
-        break;
-      }
-    }
-    count += w;
-  }
-  return count;
-}
-
-function deriveThreatBreakdown(game) {
-  const rows = [];
-  for (const c of game.threat) {
-    if (!isThreat(c)) continue;
-    let w = 1;
-    for (const card of inPlayCards(game)) {
-      if (card.threatWeight && matches(c, card.threatWeight.match)) {
-        w = card.threatWeight.weight;
-        break;
-      }
-    }
-    rows.push({ card: c, weight: w });
-  }
-  return rows;
-}
-
-function deriveStatus(game) {
-  for (const c of inPlayCards(game)) {
-    if (c.loseIf && deriveThreatCount(game) >= (c.loseIf.threatsCount || 0)) return 'lost';
-  }
-  if (game.deck.length === 0) return 'won';
-  return 'playing';
-}
-
-function deriveVpMap(game) {
+// Единый снапшот производных состояний за один проход. Раньше логика была
+// размазана по deriveThreatCount/deriveThreatBreakdown/getScore/
+// deriveScoreBreakdown — теперь всё считается здесь, остальные функции
+// переиспользуют результат (локальность + единый источник истины).
+function deriveSnapshot(game) {
   const inPlay = inPlayCards(game);
   const asleep = deriveAsleepSet(game);
   const vp = new Map();
   for (const c of inPlay) vp.set(c, c.vp || 0);
-  // modifyVp — absolute override базы
+  // modifyVp — абсолютный оверрайд базы
   for (const c of inPlay) {
     for (const e of c.effects || []) {
-      if (e.op === 'modifyVp') for (const t of inPlay) if (matches(t, e.match)) vp.set(t, e.value);
+      if (e.op === 'modifyVp') for (const t of inPlay) if (matches(game, t, e.match)) vp.set(t, e.value);
     }
   }
-  // attach — добавляется ПОСЛЕ modifyVp (Хит не теряется при Порванной струне)
+  // attach — ПОСЛЕ modifyVp (Хит не теряется при Порванной струне)
   for (const c of inPlay) {
     if (c.attached) {
       for (const a of c.attached) {
@@ -505,7 +490,7 @@ function deriveVpMap(game) {
     for (const e of c.effects || []) {
       if (e.op === 'addVp') {
         if (e.if && !conditionMet(game, e.if)) continue;
-        for (const t of inPlay) if (matches(t, e.match)) vp.set(t, (vp.get(t) || 0) + e.amount);
+        for (const t of inPlay) if (matches(game, t, e.match)) vp.set(t, (vp.get(t) || 0) + e.amount);
       }
     }
   }
@@ -520,37 +505,21 @@ function deriveVpMap(game) {
   }
   // сон обнуляет
   for (const c of asleep) vp.set(c, 0);
-  return vp;
-}
 
-function getScore(game) {
-  if (game.status === 'lost') return 0;
-  const inPlay = inPlayCards(game);
-  const vp = deriveVpMap(game);
-  const asleep = deriveAsleepSet(game);
+  // веса Угрозы — один цикл (было в deriveThreatCount / deriveThreatBreakdown)
+  const threatRows = [];
+  for (const c of game.threat) {
+    if (!isThreat(c)) continue;
+    let w = 1;
+    for (const card of inPlay) {
+      if (card.threatWeight && matches(game, c, card.threatWeight.match)) { w = card.threatWeight.weight; break; }
+    }
+    threatRows.push({ card: c, weight: w });
+  }
+
+  // итоговый счёт + вклады (один проход scorePerPerson)
   let total = 0;
   for (const c of inPlay) total += vp.get(c) || 0;
-  for (const c of inPlay) {
-    for (const e of c.effects || []) {
-      if (e.op === 'scorePerPerson') {
-        const persons = inPlay.filter((p) => isPerson(p) && !asleep.has(p)).length;
-        total += e.amount * persons;
-      }
-    }
-  }
-  return total;
-}
-
-// Вклады в итоговый счёт, точно суммирующиеся в getScore (для таблицы финала).
-function deriveScoreBreakdown(game) {
-  const inPlay = inPlayCards(game);
-  const vp = deriveVpMap(game);
-  const asleep = deriveAsleepSet(game);
-  const rows = [];
-  for (const c of inPlay) {
-    const v = vp.get(c) || 0;
-    if (v !== 0) rows.push({ card: c, value: v });
-  }
   let bonus = 0;
   for (const c of inPlay) {
     for (const e of c.effects || []) {
@@ -560,19 +529,51 @@ function deriveScoreBreakdown(game) {
       bonus += e.amount * persons;
     }
   }
-  if (bonus !== 0) rows.push({ label: 'Бонус за гостей', value: bonus });
-  return rows;
+  total += bonus;
+  const score = game.status === 'lost' ? 0 : total;
+  const scoreRows = [];
+  for (const c of inPlay) {
+    const v = vp.get(c) || 0;
+    if (v !== 0) scoreRows.push({ card: c, value: v });
+  }
+  if (bonus !== 0) scoreRows.push({ label: 'Бонус за гостей', value: bonus });
+
+  return { inPlay, asleep, vpMap: vp, threatRows, score, scoreRows };
+}
+
+function deriveThreatCount(game) {
+  return deriveSnapshot(game).threatRows.reduce((s, r) => s + r.weight, 0);
+}
+
+function deriveThreatBreakdown(game) {
+  return deriveSnapshot(game).threatRows;
+}
+
+function deriveStatus(game) {
+  for (const c of inPlayCards(game)) {
+    if (c.loseIf && deriveThreatCount(game) >= (c.loseIf.threatsCount || 0)) return 'lost';
+  }
+  if (game.deck.length === 0) return 'won';
+  return 'playing';
+}
+
+function getScore(game) {
+  return deriveSnapshot(game).score;
+}
+
+// Вклады в итоговый счёт, точно суммирующиеся в getScore (для таблицы финала).
+function deriveScoreBreakdown(game) {
+  return deriveSnapshot(game).scoreRows;
 }
 
 // --- снапшот для UI (обогащён производными, read-only) --------------------
 
 function getState(game) {
-  const vp = deriveVpMap(game);
-  const asleep = deriveAsleepSet(game);
+  const snap = deriveSnapshot(game);
   const enrich = (c) => {
     const e = { ...c };
-    e.vpEffective = vp.get(c) || 0;
-    e.asleep = asleep.has(c);
+    e.vpEffective = snap.vpMap.get(c) || 0;
+    e.asleep = snap.asleep.has(c);
     return e;
   };
   return {
@@ -643,4 +644,5 @@ function shuffle(arr, rng) {
 globalThis.Convivium = {
   createGame, setup, takeTurn, runTurnStart, getTopCard, resolveTop, activate, getState, getScore,
   deriveThreatCount, deriveThreatBreakdown, deriveScoreBreakdown, deriveStatus, isThreat, validateCards, checkAttachInvariant,
+  matches, conditionMet, deriveAsleepSet, isPerson, isBuyFree, cloneCard,
 };

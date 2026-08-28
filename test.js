@@ -6,27 +6,16 @@ import './cards.js';
 import './engine.js';
 const { cards } = globalThis;
 const {
-  createGame, setup, takeTurn, runTurnStart, resolveTop, getScore, getState, activate, deriveThreatCount, validateCards, checkAttachInvariant,
+  createGame, setup, takeTurn, runTurnStart, resolveTop, getScore, getState, activate, deriveThreatCount, validateCards, checkAttachInvariant, cloneCard,
 } = globalThis.Convivium;
 
 // ---- helpers -------------------------------------------------------------
 
 const byName = Object.fromEntries(cards.map((c) => [c.name, c]));
 
-// Клонируем карту, чтобы каждый экземпляр в колоде был уникальной ссылкой.
-function cloneCard(name) {
-  const c = byName[name];
-  const clone = { ...c };
-  if (c.tags) clone.tags = [...c.tags];
-  if (c.effects) clone.effects = c.effects.map((e) => ({ ...e }));
-  if (c.activate) clone.activate = c.activate.map((e) => ({ ...e }));
-  if (c.attach) clone.attach = { ...c.attach };
-  return clone;
-}
-
 // Порядок колоды: индекс 0 = низ, последний элемент = верх (снимается первым).
 function makeGame(order, choose, rng) {
-  const deck = order.map((name) => cloneCard(name));
+  const deck = order.map((name) => cloneCard(byName[name]));
   const game = createGame({ deck, rng });
   const chooseFn = typeof choose === 'function'
     ? choose
@@ -242,8 +231,8 @@ test('D5c: Хит без человека в Доме уходит в сброс
 
 test('D5d: Хит можно выбрать не самого левого человека', () => {
   const chooseFn = (opts) => opts.find((c) => c.name === 'Оля') || opts[0];
-  const g = createGame({ deck: [cloneCard('Хит')], choose: chooseFn });
-  g.home = [cloneCard('Ваня'), cloneCard('Оля')];
+  const g = createGame({ deck: [cloneCard(byName['Хит'])], choose: chooseFn });
+  g.home = [cloneCard(byName['Ваня']), cloneCard(byName['Оля'])];
   g.energy = 2;
   const after = takeTurn(g, 'buy');
   const s = getState(after);
@@ -701,6 +690,61 @@ for (const sc of GOLDEN) {
     sc.expect(g);
   });
 }
+
+// ---- J. Сон = «пустая» карта / peekReorder -------------------------------
+
+test('J1: Хит не прикрепляется к спящему человеку (идёт к бодрствующему)', () => {
+  const g = createGame({ deck: [cloneCard(byName['Хит'])] });
+  g.home = [cloneCard(byName['Ваня']), cloneCard(byName['Оля'])];
+  const bed = cloneCard(byName['Кровать']);
+  g.home[0].attached = [bed];
+  bed.attachedTo = g.home[0].name; // Ваня (гитарист) спит
+  g.energy = 2;
+  const after = takeTurn(g, 'buy');
+  const s = getState(after);
+  const vanya = s.home.find((c) => c.name === 'Ваня');
+  const olya = s.home.find((c) => c.name === 'Оля');
+  assert.ok(!(vanya.attached || []).some((c) => c.name === 'Хит'), 'Хит не должен быть у спящего Вани');
+  assert.ok(olya.attached && olya.attached.some((c) => c.name === 'Хит'), 'Хит должен быть у бодрствующей Оли');
+  assert.equal(getScore(after), 1);
+});
+
+test('J2: 🔄 спящей карты не работает (no-op, возврат того же game)', () => {
+  const g = createGame({ deck: [cloneCard(byName['Шум'])] });
+  g.home = [cloneCard(byName['Ваня']), cloneCard(byName['Старшекур'])];
+  const bed = cloneCard(byName['Кровать']);
+  g.home[1].attached = [bed];
+  bed.attachedTo = g.home[1].name; // Старшекур спит
+  const before = getState(g).home.map((c) => c.name).join(',');
+  const after = activate(g, 'Старшекур');
+  assert.equal(after, g, 'activate спящей карты возвращает тот же game');
+  const s = getState(after);
+  assert.equal(s.home.map((c) => c.name).join(','), before, 'состояние не изменилось');
+  assert.equal(s.threat.length, 0, 'Шум не сброшен (активация не сработала)');
+});
+
+test('J3: conditionMet ложно для спящего гитариста (Натянуть струну не срабатывает)', () => {
+  const g = createGame({ deck: [cloneCard(byName['Порванная струна'])] });
+  g.home = [cloneCard(byName['Ваня']), cloneCard(byName['Оля']), cloneCard(byName['Натянуть струну'])];
+  const bed = cloneCard(byName['Кровать']);
+  g.home[0].attached = [bed];
+  bed.attachedTo = g.home[0].name; // Ваня (гитарист) спит
+  g.threat = [cloneCard(byName['Порванная струна'])];
+  const after = activate(g, 'Натянуть струну');
+  const s = getState(after);
+  assert.ok(s.threat.some((c) => c.name === 'Порванная струна'), 'Порванная струна не сброшена: гитарист спит');
+});
+
+test('J4: peekReorder через game.reorder реально меняет порядок верхних карт', () => {
+  const g = createGame({ deck: [cloneCard(byName['Комната 402']), cloneCard(byName['Тост']), cloneCard(byName['Плов']), cloneCard(byName['Хит'])] });
+  g.home = [cloneCard(byName['Ваня']), cloneCard(byName['Массовый перекур'])];
+  g.reorder = (top) => [...top].reverse();
+  const before = g.deck.map((c) => c.name).join(',');
+  const after = activate(g, 'Массовый перекур');
+  const afterDeck = after.deck.map((c) => c.name).join(',');
+  assert.equal(after.deck.length, 4, 'колода той же длины');
+  assert.notEqual(afterDeck, before, 'порядок верхних карт изменился');
+});
 
 // ---- I. Иммутабельность / строгие фазы / валидация -----------------------
 

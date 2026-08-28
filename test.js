@@ -6,7 +6,7 @@ import './cards.js';
 import './engine.js';
 const { cards } = globalThis;
 const {
-  createGame, setup, takeTurn, runTurnStart, resolveTop, getScore, getState, activate, deriveThreatCount, validateCards, checkAttachInvariant, cloneCard,
+  createGame, setup, takeTurn, runTurnStart, resolveTop, getScore, getState, activate, deriveThreatCount, deriveScoreBreakdown, validateCards, checkAttachInvariant, cloneCard,
 } = globalThis.Convivium;
 
 // ---- helpers -------------------------------------------------------------
@@ -690,6 +690,42 @@ for (const sc of GOLDEN) {
     sc.expect(g);
   });
 }
+
+// ---- K. Итоговый счёт финала (snap-shot) ----------------------------------
+
+test('K1: итоговый счёт финала — attach-бонус + угроза + scorePerPerson суммируются корректно', () => {
+  const g = createGame({ deck: [] });
+  g.home = [cloneCard(byName['Ваня']), cloneCard(byName['Денис']), cloneCard(byName['Оля'])];
+  g.threat = [cloneCard(byName['День рождения!']), cloneCard(byName['Большая вечеринка'])];
+  // прикрепляем Звёздный час к Ване вручную (аналог applyAttach)
+  const vanya = g.home[0];
+  const star = cloneCard(byName['Звёздный час']);
+  star.attachedTo = vanya.name;
+  vanya.attached = [star];
+  g.status = 'won';
+  // Ваня: 1(база) +1(Звёздный час) +1(бонус гитаристу) = 3
+  // День рождения!: 2 ; Денис/Оля/Большая вечеринка: 0
+  // scorePerPerson: 3 человека в игре * 1 = 3
+  // итого: 3 + 2 + 3 = 8
+  assert.equal(getScore(g), 8);
+  const rows = deriveScoreBreakdown(g);
+  const sum = rows.reduce((s, r) => s + (r.value || 0), 0);
+  assert.equal(sum, getScore(g), 'breakdown не суммируется в getScore');
+});
+
+test('K2: итоговый счёт финала равен 0 при поражении (loseIf), даже если ПО в игре есть', () => {
+  const g = createGame({ deck: [] });
+  // Обход + 3 Угрозы + пара гитаристов с ПО — но поражение обнуляет счёт
+  g.home = [cloneCard(byName['Ваня']), cloneCard(byName['Оля'])];
+  g.threat = [
+    cloneCard(byName['Обход']),
+    cloneCard(byName['Шум']),
+    cloneCard(byName['Шум']),
+    cloneCard(byName['Порванная струна']),
+  ];
+  g.status = 'lost';
+  assert.equal(getScore(g), 0);
+});
 
 // ---- J. Сон = «пустая» карта / peekReorder -------------------------------
 

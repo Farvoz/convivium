@@ -4,11 +4,11 @@
 // Тайминги (autoTimer) и занятость (busy) остаются в UI-слое.
 (function () {
   function enableGesture(el, opts = {}) {
-    const { threshold = 60, decide, perform, onStart } = opts;
-    let startX = null, dx = 0;
+    const { threshold = 60, decide, perform, onStart, onTap } = opts;
+    let startX = null, startY = null, dx = 0;
     el.onpointerdown = (e) => {
       if (onStart) onStart();
-      startX = e.clientX; dx = 0;
+      startX = e.clientX; startY = e.clientY; dx = 0;
       el.setPointerCapture(e.pointerId);
       el.classList.add('dragging');
       if (e.cancelable) e.preventDefault();
@@ -22,9 +22,15 @@
     el.onpointerup = (e) => {
       if (startX == null) return;
       el.classList.remove('dragging');
-      const action = decide ? decide(dx) : null;
+      const movedX = e.clientX - startX;
+      const movedY = e.clientY - startY;
       el.style.transform = '';
-      startX = null;
+      startX = null; startY = null;
+      if (onTap && Math.abs(movedX) < 8 && Math.abs(movedY) < 8) {
+        onTap();
+        return;
+      }
+      const action = decide ? decide(dx) : null;
       if (action) perform(action);
     };
     el.onpointercancel = () => {

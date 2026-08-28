@@ -20,7 +20,8 @@
     function collectActivatable() {
       const asleep = deriveAsleepSet(state.game);
       return [...state.game.home, ...state.game.threat]
-        .filter((c) => c.cost === '🔄' && !asleep.has(c));
+        .filter((c) => c.cost === '🔄' && !asleep.has(c))
+        .map((c) => c.name);
     }
 
     function logResolve(card, action) {

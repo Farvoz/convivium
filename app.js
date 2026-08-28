@@ -176,17 +176,49 @@ function renderCardEl(card, { compact = false, detail = false } = {}) {
   return el;
 }
 
-function stripCardEl(c) {
-  const el = renderCardEl(c, { compact: true });
-  if (tc.state.phase === 'activate' && tc.state.activatable.has(c)) {
+// ---------------------------------------------------------------------------
+// CardView — единая точка отрисовки карточки (data-driven, без спецкейсов)
+// ---------------------------------------------------------------------------
+
+/**
+ * @typedef {Object} Card  Карта (структура из cards.js; поля читаются data-driven)
+ * @property {string} name
+ * @property {number} [vp]
+ * @property {string[]} [tags]
+ * @property {boolean} [asleep]
+ * @property {'up'|'down'|null} [arrow]
+ */
+
+/**
+ * @typedef {Object} CardViewOptions
+ * @property {'compact'|'detail'|'strip'} [variant='strip']  Размер/контекст
+ * @property {'none'|'click'|'activate'}   [interactive='none']
+ *   'click' → открыть детали; 'activate' → tc.activate; 'none' → пассивно
+ * @property {(card: Card) => void} [onClick]  Перехват клика (вместо openDetail)
+ */
+
+/**
+ * @param {Card} card
+ * @param {CardViewOptions} [opts]
+ * @returns {HTMLElement}
+ */
+function CardView(card, opts = {}) {
+  const { variant = 'strip', interactive = 'none', onClick } = opts;
+  const el = renderCardEl(card, { compact: variant === 'compact', detail: variant === 'detail' });
+  if (interactive === 'activate') {
     el.classList.add('activatable');
     el.title = 'Активировать';
-    el.onclick = () => tc.activate(c.name);
-  } else {
+    el.onclick = () => tc.activate(card.name);
+  } else if (interactive === 'click') {
     el.classList.add('clickable');
-    el.onclick = () => openDetail(c);
+    el.onclick = () => (onClick ? onClick(card) : openDetail(card));
   }
   return el;
+}
+
+function stripCardEl(c) {
+  const activate = tc.state.phase === 'activate' && tc.state.activatable.has(c.name);
+  return CardView(c, { variant: 'strip', interactive: activate ? 'activate' : 'click' });
 }
 
 function render() {
@@ -236,7 +268,7 @@ function renderCardBack() {
 
 function renderCenterBack() {
   const wrap = $('center-card');
-  wrap.className = 'pop-in';
+  wrap.className = 'pop-in tappable';
   wrap.innerHTML = '';
   wrap.appendChild(renderCardBack());
 }
@@ -254,8 +286,8 @@ function flipReveal(card) {
 
     requestAnimationFrame(() => { flip.style.transform = 'rotateY(90deg)'; });
     setTimeout(() => {
-      flip.innerHTML = '';
-      flip.appendChild(renderCardEl(card, { detail: true }));
+       flip.innerHTML = '';
+       flip.appendChild(CardView(card, { variant: 'detail' }));
       flip.style.transition = 'none';
       flip.style.transform = 'rotateY(-90deg)';
       requestAnimationFrame(() => {
@@ -276,13 +308,12 @@ function goPrep() {
   const row = $('prep-cards');
   row.innerHTML = '';
   for (const c of top3) {
-    const el = renderCardEl(c);
-    el.classList.add('clickable', 'prep-card');
-    const badge = document.createElement('div');
-    badge.className = 'card-badge-free';
-    badge.textContent = '0⚡';
-    el.appendChild(badge);
-    el.onclick = () => openDetail(c, { onConfirm: choosePrepUI, confirmLabel: 'Взять в Дом' });
+    const el = CardView(c, {
+      variant: 'compact',
+      interactive: 'click',
+      onClick: () => { pushLog('Открыта: ' + c.name); openDetail(c, { onConfirm: choosePrepUI, confirmLabel: 'Взять в Дом' }); },
+    });
+    el.classList.add('prep-card');
     row.appendChild(el);
   }
 }
@@ -308,6 +339,7 @@ async function drawAndReveal() {
   $('buy-e').style.display = '';
   $('center-card').classList.remove('hidden');
   const card = tc.take();          // peek, переход в 'reveal', рендер рубашки
+  pushLog('Открыта: ' + card.name);
   await flipReveal(card);
   busy = false;
   enableDecisionUI(card);
@@ -328,6 +360,7 @@ function showTakePhaseUI() {
     threshold: 60,
     decide: (dx) => (dx > 60 ? 'take' : null),
     perform: () => drawAndReveal(),
+    onTap: () => drawAndReveal(),
     onStart: clearAutoTimer,
   });
   $('play-info').textContent = '';
@@ -410,79 +443,87 @@ function disableSwipe() {
 // ---------------------------------------------------------------------------
 // Оверлеи выбора — реализация инъектированного promptChoice контроллера
 // ---------------------------------------------------------------------------
-function chooseFromThreats() {
+// ---------------------------------------------------------------------------
+// ChoiceOverlay — единый оверлей выбора (заменяет 3 дублирующихся функции)
+// ---------------------------------------------------------------------------
+
+/**
+ * @typedef {Object} ChoiceOverlayOptions
+ * @property {string} title
+ * @property {Card[]} items
+ * @property {'select'|'reorder'} [mode='select']
+ * @property {'compact'|'detail'|'strip'} [variant='compact']
+ */
+
+/**
+ * Показать оверлей выбора.
+ * - mode 'select'  → resolve(выбранный элемент) или null, если items пуст
+ * - mode 'reorder' → resolve(упорядоченный массив выбранных)
+ * @param {ChoiceOverlayOptions} o
+ * @returns {Promise<any>}
+ */
+function ChoiceOverlay(o) {
   return new Promise((resolve) => {
     const ov = $('choice-overlay');
     const list = $('choice-cards');
-    list.innerHTML = '';
-    const threats = tc.state.game.threat.slice();
-    if (threats.length === 0) { resolve(null); return; }
-    $('choice-title').textContent = 'Выбери угрозу';
-    for (const t of threats) {
-      const el = renderCardEl(t, { compact: true });
-      el.classList.add('clickable');
-      el.onclick = () => { ov.classList.add('hidden'); resolve(t); };
-      list.appendChild(el);
-    }
-    ov.classList.remove('hidden');
-  });
-}
+    const title = $('choice-title');
+    const variant = o.variant || 'compact';
 
-function chooseFromPersons(match) {
-  return new Promise((resolve) => {
-    const ov = $('choice-overlay');
-    const list = $('choice-cards');
-    list.innerHTML = '';
-    const persons = tc.state.game.home.filter((c) => matches(tc.state.game, c, match || {}));
-    if (persons.length === 0) { resolve(null); return; }
-    $('choice-title').textContent = 'Подложить под кого?';
-    for (const p of persons) {
-      const el = renderCardEl(p, { compact: true });
-      el.classList.add('clickable');
-      el.onclick = () => { ov.classList.add('hidden'); resolve(p); };
-      list.appendChild(el);
+    if (o.mode === 'reorder') {
+      const working = o.items.slice();
+      const ordered = [];
+      const draw = () => {
+        list.innerHTML = '';
+        if (working.length === 0) { ov.classList.add('hidden'); resolve(ordered); return; }
+        title.textContent = o.title;
+        for (const c of working) {
+          const el = CardView(c, { variant, interactive: 'click', onClick: () => {
+            ordered.push(c);
+            working.splice(working.indexOf(c), 1);
+            draw();
+          } });
+          list.appendChild(el);
+        }
+        ov.classList.remove('hidden');
+      };
+      draw();
+      return;
     }
-    ov.classList.remove('hidden');
-  });
-}
 
-async function reorderDeck(count) {
-  const n = Math.min(count || 0, tc.state.game.deck.length);
-  if (n < 1) return [];
-  const working = tc.state.game.deck.slice(0, n);
-  const ordered = [];
-  await new Promise((resolve) => {
-    const ov = $('choice-overlay');
-    const list = $('choice-cards');
-    const render = () => {
-      list.innerHTML = '';
-      if (working.length === 0) {
+    if (o.items.length === 0) { resolve(null); return; }
+    title.textContent = o.title;
+    list.innerHTML = '';
+    for (const item of o.items) {
+      const el = CardView(item, { variant, interactive: 'click', onClick: () => {
         ov.classList.add('hidden');
-        resolve();
-        return;
-      }
-      $('choice-title').textContent = 'Расставь карты: выбери верхнюю';
-      for (const c of working) {
-        const el = renderCardEl(c, { detail: true });
-        el.classList.add('clickable');
-        el.onclick = () => {
-          ordered.push(c);
-          working.splice(working.indexOf(c), 1);
-          render();
-        };
-        list.appendChild(el);
-      }
-    };
-    render();
+        resolve(item);
+      } });
+      list.appendChild(el);
+    }
     ov.classList.remove('hidden');
   });
-  return ordered;
 }
 
 async function promptChoiceAdapter(payload) {
-  if (payload.kind === 'threats') return chooseFromThreats();
-  if (payload.kind === 'persons') return chooseFromPersons(payload.match);
-  if (payload.kind === 'reorder') return reorderDeck(payload.count);
+  if (payload.kind === 'threats') {
+    const threats = tc.state.game.threat.slice();
+    return threats.length
+      ? ChoiceOverlay({ title: 'Выбери угрозу', items: threats })
+      : null;
+  }
+  if (payload.kind === 'persons') {
+    const match = payload.match || {};
+    const persons = tc.state.game.home.filter((c) => matches(tc.state.game, c, match));
+    return persons.length
+      ? ChoiceOverlay({ title: 'Подложить под кого?', items: persons })
+      : null;
+  }
+  if (payload.kind === 'reorder') {
+    const n = Math.min(payload.count || 0, tc.state.game.deck.length);
+    if (n < 1) return [];
+    const working = tc.state.game.deck.slice(0, n);
+    return ChoiceOverlay({ title: 'Расставь карты: выбери верхнюю', items: working, mode: 'reorder', variant: 'detail' });
+  }
   return null;
 }
 
@@ -492,7 +533,7 @@ async function promptChoiceAdapter(payload) {
 function openDetail(c, opts = {}) {
   const d = $('detail-card');
   d.innerHTML = '';
-  d.appendChild(renderCardEl(c, { detail: true }));
+  d.appendChild(CardView(c, { variant: 'detail' }));
   if (c.attached && c.attached.length) {
     const sub = document.createElement('div');
     sub.className = 'card-desc';
@@ -541,7 +582,7 @@ function openDiscard() {
     grid.appendChild(p);
   }
   for (const c of s.discard) {
-    const el = renderCardEl(c, { compact: true });
+    const el = CardView(c, { variant: 'compact' });
     grid.appendChild(el);
   }
   $('discard-overlay').classList.remove('hidden');
@@ -583,7 +624,7 @@ function renderEndTable(container, valLabel, rows, total) {
     const tr = document.createElement('tr');
     const tdC = document.createElement('td');
     if (r.card) {
-      tdC.appendChild(renderCardEl(r.card, { compact: true }));
+      tdC.appendChild(CardView(r.card, { variant: 'compact' }));
     } else {
       tdC.textContent = r.label || '';
       tdC.classList.add('end-row-label');

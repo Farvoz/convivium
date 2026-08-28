@@ -30,10 +30,9 @@
       <div class="prep-head">
         <div class="prep-emoji">🍽️</div>
         <h2>Подготовка</h2>
-        <p class="prep-sub">Шаг 1 · бесплатный выбор</p>
       </div>
       <p class="hint">Нажми на карту, чтобы посмотреть подробнее, потом подтверди выбор. Одну заберёшь в Дом бесплатно, остальные уйдут в сброс.</p>
-      <div id="prep-cards" class="card-row prep-row"></div>
+      <div id="prep-cards" class="prep-row"></div>
     </section>
 
     <!-- Game -->
@@ -63,7 +62,7 @@
       <div id="energy" class="energy">⚡ <span id="energy-val">0</span></div>
 
       <div id="home-strip" class="strip">
-        <div class="strip-label">Дом</div>
+        <div class="strip-label">На вечеринке уже собрался народ, а также:</div>
         <div id="home-cards" class="strip-cards"></div>
       </div>
 
@@ -110,7 +109,7 @@
     <div id="log-drawer" class="drawer hidden">
       <div class="drawer-head">
         <span>События</span>
-        <button id="log-close" class="btn-small">✕</button>
+        <button id="log-close" class="btn-small btn-close">✕</button>
       </div>
       <ul id="log-list"></ul>
     </div>
@@ -118,9 +117,12 @@
     <!-- Detail overlay -->
     <div id="detail-overlay" class="overlay hidden">
       <div class="overlay-inner">
+        <div class="overlay-head">
+          <span>Карта</span>
+          <button id="detail-close" class="btn-small btn-close">✕</button>
+        </div>
         <div id="detail-card"></div>
         <button id="detail-confirm" class="btn-primary wide hidden">Взять в Дом</button>
-        <button id="detail-close" class="btn-small wide">Закрыть</button>
       </div>
     </div>
 
@@ -129,7 +131,7 @@
       <div class="overlay-inner">
         <div class="overlay-head">
           <span>Сброс</span>
-          <button id="discard-close" class="btn-small">✕</button>
+          <button id="discard-close" class="btn-small btn-close">✕</button>
         </div>
         <div id="discard-cards" class="card-grid"></div>
       </div>

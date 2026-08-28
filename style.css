@@ -73,6 +73,11 @@ html, body {
   cursor: pointer;
 }
 .btn-small.wide { width: 100%; margin-top: 10px; }
+.btn-close {
+  font-weight: 700;
+  font-size: 18px;
+  line-height: 1;
+}
 
 /* ---- start ---- */
 .start-box, .end-box {
@@ -92,28 +97,20 @@ h1 { font-size: 34px; margin: 0; letter-spacing: 1px; }
 #screen-prep h2 { text-align: center; margin: 2px 0 0; }
 .prep-head { text-align: center; }
 .prep-emoji { font-size: 40px; line-height: 1; }
-.prep-sub {
-  text-align: center; color: var(--accent); font-weight: 700;
-  font-size: 12px; letter-spacing: .5px; text-transform: uppercase;
-  margin: 2px 0 0;
-}
 #screen-prep .hint { max-width: 340px; margin: 0 auto; }
-.prep-row { margin-top: 4px; }
-
-/* крупные карты подготовки: трое в ряд на любом экране */
-.card.prep-card {
-  flex: 1 1 0;
-  width: auto;
-  min-width: 0;
-  max-width: 160px;
-  height: 200px;
+.prep-row {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  margin-top: 8px;
 }
-.card-badge-free {
-  position: absolute; top: 6px; left: 6px;
-  background: var(--accent2); color: #fff;
-  font-size: 11px; font-weight: 700;
-  border-radius: 8px; padding: 2px 7px;
-  z-index: 3;
+
+/* крупные карты подготовки: трое вертикально, без скролла */
+.card.prep-card {
+  width: min(92vw, 300px);
+  max-width: none;
+  height: clamp(140px, 25vh, 180px);
 }
 #detail-confirm { margin-top: 12px; }
 .lead { color: var(--muted); max-width: 280px; margin: 0; }
@@ -178,7 +175,7 @@ h1 { font-size: 34px; margin: 0; letter-spacing: 1px; }
   display: flex;
   gap: 8px;
   overflow-x: auto;
-  padding-bottom: 4px;
+  padding: 12px 10px 14px;
   scrollbar-width: thin;
   min-height: 150px;
 }
@@ -198,7 +195,8 @@ h1 { font-size: 34px; margin: 0; letter-spacing: 1px; }
   gap: 14px;
   min-height: 0;
 }
-#center-card { width: fit-content; max-width: 80vw; touch-action: none; perspective: 1100px; }
+#center-card { width: fit-content; max-width: 80vw; touch-action: none; perspective: 1100px; position: relative; z-index: 20; }
+#center-card.tappable { cursor: pointer; }
 #play-row { display: flex; align-items: center; justify-content: center; gap: 12px; }
 #center-card .card { touch-action: none; }
 
@@ -366,7 +364,7 @@ h1 { font-size: 34px; margin: 0; letter-spacing: 1px; }
 
 /* ---- негативные карты: угрозы (↑) и авто (↓) ---- */
 .card.neg { border-top: 3px solid var(--threat); }
-.card.neg::before {
+.overlay .card.neg::before {
   content: "Угроза";
   position: absolute; top: 0; left: 0; right: 0;
   background: var(--threat); color: #fff;
@@ -375,7 +373,7 @@ h1 { font-size: 34px; margin: 0; letter-spacing: 1px; }
   z-index: 2;
 }
 .card.neg.auto { border-top-color: var(--accent); }
-.card.neg.auto::before { content: "Авто"; background: var(--accent); }
+.overlay .card.neg.auto::before { content: "Авто"; background: var(--accent); }
 
 /* ---- рубашка карты (фон центра в фазе активации / перед взятием) ---- */
 .card-back {

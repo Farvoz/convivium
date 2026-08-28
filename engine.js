@@ -464,6 +464,12 @@ function deriveAsleepSet(game) {
 // deriveScoreBreakdown — теперь всё считается здесь, остальные функции
 // переиспользуют результат (локальность + единый источник истины).
 function deriveSnapshot(game) {
+  // ВАЖНО: inPlay = home + threat. Прикреплённые карты (attach) уходят из Дома в
+  // owner.attached (см. applyAttach), поэтому их СОБСТВЕННЫЕ derive-эффекты
+  // (modifyVp/addVp/bonusVp/scorePerPerson) здесь НЕ считаются — считается только
+  // их вклад владельцу (a.vp + a.attach.bonusVp, ниже в цикле attach). Текущий
+  // набор карт этим не страдает (attach-карты не имеют derive-эффектов), но
+  // будущая attach-карта с таким эффектом проигнорируется — это инвариант.
   const inPlay = inPlayCards(game);
   const asleep = deriveAsleepSet(game);
   const vp = new Map();

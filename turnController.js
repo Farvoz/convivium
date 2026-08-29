@@ -6,6 +6,7 @@
   const {
     createGame, setup, runTurnStart, getTopCard, resolveTop, activate: engineActivate,
     deriveAsleepSet, isBuyFree, deriveBuyCost, matches, deriveThreatCount, findInterceptors,
+    discardWithTarget,
   } = globalThis.Convivium;
 
   function createTurnController({ render, log, promptChoice }) {
@@ -84,13 +85,28 @@
     function assess() {
       const card = state.topCard;
       const intercepted = findInterceptors(state.game, card).length > 0;
+      const instant = !!(card && (card.effects || []).some((e) => e.op === 'discardWith') && discardWithTarget(state.game, card));
       state.canBuy = state.game.energy >= deriveBuyCost(state.game) || isBuyFree(state.game, card);
-      return { arrow: !!(card && card.arrow), canBuy: state.canBuy, intercepted };
+      state.instant = instant;
+      return { arrow: !!(card && card.arrow), canBuy: state.canBuy, intercepted, instant };
     }
 
     async function decide(action) {
       if (state.phase !== 'reveal') return false;
-      if (action === 'buy' && state.topCard.attach && state.topCard.attach.choose) {
+      const card = state.topCard;
+      const dw = discardWithTarget(state.game, card);
+      if (dw) {
+        // Мгновенный эффект связки: Стол + эта карта уходят в сброс, выбор
+        // игрока не требуется (и перехват не применяется).
+        state.game = resolveTop(state.game, null);
+        log('❗️ ' + card.name + ' и ' + dw.name + ' сброшены (Стол в Доме)');
+        state.phase = 'transition';
+        render();
+        if (state.game.status !== 'playing') { state.phase = 'gameover'; render(); return true; }
+        await startTurn();
+        return true;
+      }
+      if (action === 'buy' && card.attach && card.attach.choose) {
         const pool = state.game.home.filter((c) => matches(state.game, c, state.topCard.attach.match));
         if (pool.length > 1) {
           const chosen = await promptChoice({ kind: 'persons', match: state.topCard.attach.match });

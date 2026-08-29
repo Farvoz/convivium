@@ -159,6 +159,17 @@ const cards = [
   {
     name: '3-й сосед',
     tags: ['man'],
+    description: '❗️ Если в Доме уже есть Стол — при вскрытии сбрось Стол и себя.',
+    effects: [
+      { op: 'discardWith', match: { name: 'Стол' }, in: 'home' },
+    ],
+  },
+  {
+    name: 'Стол',
+    description: '⚡ Пока в Доме: при вскрытии Угрозы или авто-карты получи 1 энергию.',
+    effects: [
+      { op: 'energyOnReveal', amount: 1 },
+    ],
   },
   {
     name: 'Старшекур',

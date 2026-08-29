@@ -426,7 +426,7 @@ function enableDecisionUI(card) {
 
   const a = tc.assess();
   const interceptor = a.intercepted ? findInterceptor(tc.state.game, card) : null;
-  if (a.arrow || interceptor) {    // стрелка или перехват — авто без выбора
+  if (a.arrow || interceptor || a.instant) {    // стрелка / перехват / мгновенный эффект — авто без выбора
     setTimeout(() => submitDecision(null), 720);
     return;
   }
@@ -464,12 +464,12 @@ async function submitDecision(action) {
   busy = true;
   const card = tc.state.topCard;
   const interceptor = findInterceptor(tc.state.game, card);
-  const dir = interceptor ? 'intercept' : flyDirection(card, action);
+  const dir = (interceptor && !tc.state.instant) ? 'intercept' : flyDirection(card, action);
   $('center-card').classList.add('fly-' + dir);
   await wait(420);
   const progressed = await tc.decide(action);
   busy = false;
-  if (interceptor) {
+  if (interceptor && !tc.state.instant) {
     const ownerEl = $('home-cards').querySelector('[data-name="' + interceptor.name + '"]');
     if (ownerEl) {
       ownerEl.classList.add('intercept-owner');

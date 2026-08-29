@@ -37,3 +37,39 @@ PWA опционален: service worker регистрируется тольк
 на `file://` игнорируется, поэтому игра работает обоими способами.
 Подключение через относительные пути на файловой системе.
 ВАЖНО: стараться переиспользовать существующие ops. Лучше больше описать в cards, нежели городить новые ops.
+
+## Движок (engine.js)
+
+Головной headless-движок, глобал `Convivium` (все публичные функции — внизу файла).
+Иммутабельный: каждый transition возвращает НОВЫЙ `game`, вход не мутируется.
+Логически делится на 4 слоя:
+
+### 1. DSL карт (описание эффектов)
+- `OP_REGISTRY` — единый источник истины про каждый `op`
+  (`kind`: action/derive/cond; `when`, `phaseable`, `validate`, `run`).
+- Валидация: `validateMatch` / `validateCond` / `validateEffect` / `validateCard` / `validateCards`
+  (карты валидируются при загрузке движка).
+- Предикаты и фильтры: `isThreat`, `isPerson`, `matches`, `conditionMet`,
+  `findInterceptor(s)`, `discardWithTarget`, `inPlayCards`.
+
+### 2. Состояние и копирование
+- Иммутабельное копирование: `cloneCard` / `cloneGame`.
+- Создание: `createGame`, `setup` (стартовая раскладка + `runEnterActions`).
+
+### 3. Игровой цикл (автомат фаз)
+- Фазы: `PHASES`, автомат `idle → runTurnStart → turnStarted → resolveTop → idle`
+  (нарушение порядка = ошибка).
+- Ход: `takeTurn`, `runTurnStart`, `getTopCard`, `resolveTop`, `placeCard`
+  (перехват / взаимный сброс / покупка), `applyAttach`, `applyCardActions`,
+  `applyPhaseActions`, `applyRevealPreEffects`, `applyRevealPostEffects`, `isBuyFree`.
+- Активация 🔄: `activate` (только из игры, не из сброса).
+- Шаблон Угрозы для `pullReserve`: `cloneThreatTemplate` (без дублей).
+
+### 4. Деривация и интерфейс
+- Деривация (чистые функции): `deriveSnapshot` (единый проход — остальные
+  `derive*` переиспользуют результат), `deriveThreatCount`/`Breakdown`,
+  `deriveStatus`, `getScore`, `deriveBuyCost`, `deriveScoreBreakdown`, `deriveAsleepSet`.
+- Снапшот для UI: `getState` (обогащает карты `vpEffective`/`asleep`).
+- Утилиты и инварианты: `removeFromZone`, `removeCard`, `detachAttachments`,
+  `checkAttachInvariant`, `checkPlaceInvariant`, `shuffle`.
+- Сборка колоды: `buildDeck` (prep + случайные вредные + «Обход»).

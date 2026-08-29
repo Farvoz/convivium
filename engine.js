@@ -32,6 +32,12 @@ const OP_REGISTRY = {
         const [target] = zone.splice(idx, 1);
         detachAttachments(game, target);
         game.discard.push(target);
+        // источник занимает слот удалённой цели -> порядок зоны сохраняется
+        const srcIdx = zone.indexOf(source);
+        if (srcIdx >= 0 && srcIdx !== idx) {
+          zone.splice(srcIdx, 1);
+          zone.splice(idx, 0, source);
+        }
       }
     },
   },
@@ -140,8 +146,15 @@ const OP_REGISTRY = {
     validate(e, where) { validateMatch(e.match, where + '.buyFreeIf'); },
   },
   intercept: {
-    kind: 'action', when: undefined, phaseable: false,
+    kind: 'action', when: undefined, phaseable: false, reveal: true,
     validate(e, where) { if (e.match !== undefined) validateMatch(e.match, where + '.intercept'); },
+    // Перехват — эффект ВЛАДЕЛЬЦА: кладёт вскрытую карту под себя.
+    // card — вскрытая карта (target), owner — владелец с этим эффектом.
+    run(g, owner, e, card) {
+      owner.attached = owner.attached || [];
+      owner.attached.push(card);
+      card.attachedTo = owner.name;
+    },
   },
   scorePerAttached: {
     kind: 'derive', phaseable: false,
@@ -149,6 +162,29 @@ const OP_REGISTRY = {
       if (typeof e.amount !== 'number') throw new Error(`${where}: scorePerAttached.amount number`);
       validateMatch(e.match, where + '.scorePerAttached');
     },
+  },
+  discardWith: {
+    kind: 'action', when: undefined, phaseable: false, reveal: true, self: true,
+    validate(e, where) {
+      validateMatch(e.match, where + '.discardWith');
+      if (!['home', 'threat'].includes(e.in)) throw new Error(`${where}: discardWith.in home|threat`);
+    },
+    // Взаимный сброс: цель уже в зоне (Стол) — сбросить и её, и вскрытую карту.
+    // Возвращает true, если карта «поглощена» (дальнейшее размещение не нужно).
+    run(g, source, e) {
+      const t = discardWithTarget(g, source);
+      if (!t) return false;
+      const zone = e.in === 'threat' ? g.threat : g.home;
+      detachAttachments(g, t);
+      removeFromZone(zone, t);
+      g.discard.push(t);
+      g.discard.push(source);
+      return true;
+    },
+  },
+  energyOnReveal: {
+    kind: 'action', when: undefined, phaseable: false, reveal: true, post: true,
+    validate(e, where) { if (typeof e.amount !== 'number') throw new Error(`${where}: energyOnReveal.amount number`); },
   },
 };
 
@@ -316,6 +352,17 @@ function conditionMet(game, cond) {
   return true;
 }
 
+// Цель взаимного сброса для вскрытой карты: если у карты есть эффект discardWith
+// и в указанной зоне уже лежит совпадение — возвращает эту карту, иначе null.
+// Используется в placeCard (сам сброс) и в UI/контроллере (детект мгновенного
+// эффекта до хода игрока).
+function discardWithTarget(game, card) {
+  const e = (card.effects || []).find((x) => x.op === 'discardWith');
+  if (!e) return null;
+  const zone = e.in === 'threat' ? game.threat : game.home;
+  return zone.find((t) => matches(game, t, e.match)) || null;
+}
+
 // --- иммутабельное копирование --------------------------------------------
 
 function cloneCard(card) {
@@ -413,6 +460,7 @@ function resolveTop(game, action) {
   }
   const card = g.deck.shift();
   placeCard(g, card, action);
+  applyRevealPostEffects(g, card);
   applyPhaseActions(g, 'turnEnd');
   g.status = deriveStatus(g);
   g.turnPhase = 'idle';
@@ -423,14 +471,9 @@ function resolveTop(game, action) {
 
 function placeCard(g, card, action) {
   const c = cloneCard(card);
-  const trap = findInterceptor(g, c);
-  if (trap) {
-    // перехват: карта уходит под владельца, эффекты не применяются
-    trap.attached = trap.attached || [];
-    trap.attached.push(c);
-    c.attachedTo = trap.name;
-    return;
-  }
+  // Эффекты вскрытия ДО размещения (discardWith / перехват) — единый диспетчер.
+  const outcome = applyRevealPreEffects(g, c);
+  if (outcome === 'consumed' || outcome === 'intercepted') return;
   if (c.arrow === 'up') {
     g.threat.push(c);
     runEnterActions(g, c);
@@ -494,6 +537,43 @@ function applyCardActions(g, card, phase) {
 
 function applyPhaseActions(g, phase) {
   for (const c of inPlayCards(g)) applyCardActions(g, c, phase);
+}
+
+// --- эффекты вскрытия (reveal) ----------------------------------------------
+// Единая диспетчеризация «эффектов вскрытия». Op-ы помечаются reveal:true; те,
+// что срабатывают ПОСЛЕ размещения, — post:true (energyOnReveal).
+
+// Pre-placement: возвращает 'consumed' | 'intercepted' | null.
+// Порядок: сначала собственные reveal-эффекты вскрытой карты (discardWith),
+// затем перехват владельцем (intercept). discardWith побеждает перехват.
+function applyRevealPreEffects(g, card) {
+  for (const e of card.effects || []) {
+    const entry = OP_REGISTRY[e.op];
+    // Только self-эффекты вскрытой карты (discardWith). owner-based эффекты
+    // (intercept) обрабатываются отдельно ниже — иначе карта-владелец при
+    // собственном вскрытии дважды бы вызвала свой же intercept с неверной арностью.
+    if (entry && entry.reveal && !entry.post && entry.self) {
+      if (entry.run(g, card, e)) return 'consumed';
+    }
+  }
+  const trap = findInterceptor(g, card);
+  if (trap) {
+    const e = (trap.effects || []).find((x) => x.op === 'intercept');
+    OP_REGISTRY.intercept.run(g, trap, e, card);
+    return 'intercepted';
+  }
+  return null;
+}
+
+// Post-placement: срабатывает после ЛЮБОГО размещения (в т.ч. перехвата или
+// взаимного сброса), если вскрытая карта имеет стрелку. ⚡ Энергия от Стола.
+function applyRevealPostEffects(g, card) {
+  if (card.arrow !== 'up' && card.arrow !== 'down') return;
+  for (const c of inPlayCards(g)) {
+    for (const e of c.effects || []) {
+      if (e.op === 'energyOnReveal') g.energy += e.amount;
+    }
+  }
 }
 
 // --- шаблон угрозы для pullReserve ----------------------------------------
@@ -792,5 +872,5 @@ function buildDeck(opts = {}, rng = Math.random) {
 globalThis.Convivium = {
   createGame, setup, takeTurn, runTurnStart, getTopCard, resolveTop, activate, getState, getScore,
   deriveThreatCount, deriveThreatBreakdown, deriveScoreBreakdown, deriveStatus, deriveBuyCost, isThreat, validateCards, checkAttachInvariant,
-  matches, conditionMet, deriveAsleepSet, isPerson, isBuyFree, cloneCard, buildDeck, findInterceptor, findInterceptors,
+  matches, conditionMet, deriveAsleepSet, isPerson, isBuyFree, cloneCard, buildDeck, findInterceptor, findInterceptors, discardWithTarget, applyRevealPreEffects, applyRevealPostEffects,
 };

@@ -4,9 +4,10 @@ import assert from 'node:assert/strict';
 // cards.js / engine.js выставляют данные и API через globalThis
 import './cards.js';
 import './engine.js';
+import './turnController.js';
 const { cards } = globalThis;
 const {
-  createGame, setup, takeTurn, runTurnStart, resolveTop, getScore, getState, activate, deriveThreatCount, deriveScoreBreakdown, deriveBuyCost, validateCards, checkAttachInvariant, cloneCard, buildDeck,
+  createGame, setup, takeTurn, runTurnStart, resolveTop, getScore, getState, activate, deriveThreatCount, deriveScoreBreakdown, deriveBuyCost, validateCards, checkAttachInvariant, cloneCard, buildDeck, applyRevealPreEffects, applyRevealPostEffects,
 } = globalThis.Convivium;
 
 // ---- helpers -------------------------------------------------------------
@@ -183,6 +184,34 @@ test('D4: Паша: бухой заменяет Пашу и замешивает
   assert.ok(s.deck.some((c) => c.arrow === 'up'), 'ожидалась замещённая Угроза в колоде');
 });
 
+test('D4a: Шура: бухой заменяет Шуру на том же месте в Доме (порядок сохраняется)', () => {
+  // Дом до замены: [Ваня, Шура, Паша]; Шура не на краю. Без перехватчиков (Оля/Денис),
+  // иначе авто-карта ушла бы под них и replace не сработал.
+  const g = createGame({ deck: [cloneCard(byName['Шура: бухой'])] });
+  g.home = [
+    cloneCard(byName['Ваня']),
+    cloneCard(byName['Шура']),
+    cloneCard(byName['Паша']),
+  ];
+  g.energy = 2;
+  const after = takeTurn(g, 'buy'); // Шура: бухой заходит -> заменяет Шуру
+  const order = getState(after).home.map((c) => c.name);
+  assert.deepEqual(order, ['Ваня', 'Шура: бухой', 'Паша'], 'порядок Дома должен сохраниться');
+});
+
+test('D4b: Шура заменяет Шура: бухой на том же месте в Доме (симметрия, порядок)', () => {
+  const g = createGame({ deck: [cloneCard(byName['Шура'])] });
+  g.home = [
+    cloneCard(byName['Ваня']),
+    cloneCard(byName['Шура: бухой']),
+    cloneCard(byName['Паша']),
+  ];
+  g.energy = 2;
+  const after = takeTurn(g, 'buy'); // Шура заходит -> заменяет Шура: бухой
+  const order = getState(after).home.map((c) => c.name);
+  assert.deepEqual(order, ['Ваня', 'Шура', 'Паша'], 'порядок Дома должен сохраниться');
+});
+
 test('D4b: Шура заменяет Шура: бухой, если бухой уже в игре (симметрия)', () => {
   const g = createGame({ deck: [cloneCard(byName['Шура'])] });
   g.home = [cloneCard(byName['Шура: бухой'])];
@@ -300,6 +329,134 @@ test('D8: Большая вечеринка даёт +1 ПО за каждого
   assert.ok(s.home.find((c) => c.name === 'Большая вечеринка'), 'Большая вечеринка в игре');
   // persons: Ваня + Паша + 3-й сосед = 3 => scorePerPerson +3; их ПО: Ваня 1, Паша 0, 3-й 0 => 4
   assert.equal(getScore(after), 4);
+});
+
+// ---- S. Стол + 3-й сосед (взаимный сброс / энергия при вскрытии) ----------
+
+test('S1: Стол в Доме + вскрыта Угроза -> +1 энергия', () => {
+  let game = makeGame(['Стол', 'Ваня', 'Оля', 'Шум', 'Денис'], 'Стол');
+  game = takeTurn(game, 'discard'); // Шум (arrow up) -> Зона Угрозы
+  const s = getState(game);
+  assert.equal(s.energy, 3, 'Стол дал +1 энергии за вскрытую Угрозу');
+  assert.ok(s.threat.some((c) => c.name === 'Шум'));
+});
+
+test('S2: Стол в Доме + вскрыта авто-карта -> +1 энергия', () => {
+  let game = makeGame(['Стол', 'Ваня', 'Оля', 'Кровать', 'Денис'], 'Стол');
+  game = takeTurn(game, 'buy'); // Кровать (arrow down) -> Дом автоматически
+  const s = getState(game);
+  assert.equal(s.energy, 3, 'Стол дал +1 энергии за вскрытую авто-карту');
+});
+
+test('S3: Стол в Доме + вскрыта нейтральная карта -> энергия без бонуса', () => {
+  let game = makeGame(['Стол', 'Ваня', 'Оля', 'Плов', 'Денис'], 'Стол');
+  game = takeTurn(game, 'buy'); // Плов нейтральный -> покупка, бонуса нет
+  assert.equal(getState(game).energy, 0, 'бонуса энергии быть не должно (нейтральная)');
+});
+
+test('S4: вскрыт 3-й сосед при Столе в Доме -> оба в сброс', () => {
+  let game = makeGame(['Стол', 'Ваня', 'Оля', '3-й сосед', 'Денис'], 'Стол');
+  game = takeTurn(game, 'buy'); // 3-й сосед вскрыт -> взаимный сброс
+  const s = getState(game);
+  assert.equal(s.home.some((c) => c.name === 'Стол'), false, 'Стол ушёл в сброс');
+  assert.equal(s.home.some((c) => c.name === '3-й сосед'), false, '3-й сосед не в Доме');
+  assert.ok(s.discard.some((c) => c.name === 'Стол'), 'Стол в сбросе');
+  assert.ok(s.discard.some((c) => c.name === '3-й сосед'), '3-й сосед в сбросе');
+  assert.equal(s.energy, 2, 'энергия не изменилась (сброс автоматический)');
+  assertInvariants(game);
+});
+
+test('S5: вскрыт 3-й сосед БЕЗ Стола -> обычная покупка', () => {
+  let game = makeGame(['Ваня', 'Оля', 'Денис', '3-й сосед'], 'Ваня');
+  game = takeTurn(game, 'buy');
+  const s = getState(game);
+  assert.ok(s.home.some((c) => c.name === '3-й сосед'), '3-й сосед в Доме (куплен)');
+  assert.equal(s.energy, 0, 'покупка потратила 2 энергии');
+});
+
+test('S6: 3-й сосед уже в Доме + вскрыт Стол -> Стол остаётся (нет симметрии)', () => {
+  let game = makeGame(['3-й сосед', 'Ваня', 'Оля', 'Стол', 'Денис'], '3-й сосед');
+  game = takeTurn(game, 'buy'); // Стол вскрыт и куплен
+  const s = getState(game);
+  assert.ok(s.home.some((c) => c.name === 'Стол'), 'Стол остался в Доме');
+  assert.ok(s.home.some((c) => c.name === '3-й сосед'), '3-й сосед остался в Доме');
+});
+
+test('S7: контроллер — вскрыт 3-й сосед при Столе в Доме даёт instant=true и сбрасывает обе', async () => {
+  const { createTurnController } = globalThis.Convivium;
+  const tc = createTurnController({ render() {}, log() {}, promptChoice() { return null; } });
+  const deck = ['Стол', 'Ваня', 'Оля', '3-й сосед'].map((n) => cloneCard(byName[n]));
+  tc.newSession(deck);
+  await tc.choosePrep('Стол');
+  tc.take();
+  const a = tc.assess();
+  assert.equal(a.instant, true, 'ожидался мгновенный эффект');
+  assert.equal(a.arrow, false);
+  assert.equal(a.intercepted, false);
+  await tc.decide(null);
+  const s = getState(tc.state.game);
+  assert.equal(s.home.some((c) => c.name === 'Стол'), false, 'Стол ушёл в сброс');
+  assert.ok(s.discard.some((c) => c.name === 'Стол'), 'Стол в сбросе');
+  assert.ok(s.discard.some((c) => c.name === '3-й сосед'), '3-й сосед в сбросе');
+});
+
+test('S7b: контроллер — без Стола instant=false, 3-й сосед покупается', async () => {
+  const { createTurnController } = globalThis.Convivium;
+  const tc = createTurnController({ render() {}, log() {}, promptChoice() { return null; } });
+  const deck = ['Ваня', 'Оля', 'Денис', '3-й сосед'].map((n) => cloneCard(byName[n]));
+  tc.newSession(deck);
+  await tc.choosePrep('Ваня');
+  tc.take();
+  const a = tc.assess();
+  assert.equal(a.instant, false, 'без Стола мгновенного эффекта нет');
+  await tc.decide('buy');
+  const s = getState(tc.state.game);
+  assert.ok(s.home.some((c) => c.name === '3-й сосед'), '3-й сосед куплен в Дом');
+});
+
+// ---- S8. Унифицированные reveal-эффекты (applyRevealPre/PostEffects) ------
+
+test('S8a: applyRevealPreEffects — 3-й сосед со Столом в Доме => consumed, обе в сбросе', () => {
+  const g = createGame({ deck: [] });
+  g.home = [cloneCard(byName['Стол'])];
+  const c = cloneCard(byName['3-й сосед']);
+  const outcome = applyRevealPreEffects(g, c);
+  assert.equal(outcome, 'consumed');
+  assert.ok(g.discard.some((x) => x.name === 'Стол'), 'Стол в сбросе');
+  assert.ok(g.discard.some((x) => x.name === '3-й сосед'), '3-й сосед в сбросе');
+  assert.equal(g.home.length, 0);
+});
+
+test('S8b: applyRevealPreEffects — Угроза под Денисом => intercepted, легла под Дениса', () => {
+  const g = createGame({ deck: [] });
+  g.home = [cloneCard(byName['Денис'])];
+  const c = cloneCard(byName['Шум']);
+  const outcome = applyRevealPreEffects(g, c);
+  assert.equal(outcome, 'intercepted');
+  const denis = g.home.find((x) => x.name === 'Денис');
+  assert.ok(denis.attached && denis.attached.some((a) => a.name === 'Шум'), 'Шум под Денисом');
+});
+
+test('S8c: applyRevealPreEffects — нейтральная без Стола/перехвата => null', () => {
+  const g = createGame({ deck: [] });
+  const c = cloneCard(byName['Плов']);
+  assert.equal(applyRevealPreEffects(g, c), null);
+});
+
+test('S8d: applyRevealPostEffects — Стол даёт +1 при вскрытии Угрозы', () => {
+  const g = createGame({ deck: [] });
+  g.home = [cloneCard(byName['Стол'])];
+  const before = g.energy;
+  applyRevealPostEffects(g, cloneCard(byName['Шум'])); // arrow up
+  assert.equal(g.energy, before + 1);
+});
+
+test('S8e: applyRevealPostEffects — нейтральная не даёт энергии', () => {
+  const g = createGame({ deck: [] });
+  g.home = [cloneCard(byName['Стол'])];
+  const before = g.energy;
+  applyRevealPostEffects(g, cloneCard(byName['Плов'])); // без стрелки
+  assert.equal(g.energy, before);
 });
 
 // ---- P. Механика place (ликвидация угрозы + замешивание + 1 место) --------

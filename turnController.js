@@ -83,8 +83,9 @@
 
     function assess() {
       const card = state.topCard;
+      const intercepted = findInterceptors(state.game, card).length > 0;
       state.canBuy = state.game.energy >= deriveBuyCost(state.game) || isBuyFree(state.game, card);
-      return { arrow: !!(card && card.arrow), canBuy: state.canBuy };
+      return { arrow: !!(card && card.arrow), canBuy: state.canBuy, intercepted };
     }
 
     async function decide(action) {

@@ -80,6 +80,7 @@ html, body {
   cursor: pointer;
 }
 .btn-primary:active { transform: translateY(1px); }
+.btn-primary.wide { display: block; width: 100%; margin-top: 12px; }
 .btn-small {
   background: var(--btn-ghost);
   color: var(--ink);
@@ -121,13 +122,18 @@ h1 { font-size: var(--fs-xl); margin: 0; letter-spacing: 1px; }
   align-items: center;
   gap: 10px;
   margin-top: 8px;
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  padding-bottom: 8px;
 }
 
-/* крупные карты подготовки: трое вертикально, без скролла */
-.card.prep-card {
-  width: min(92vw, 300px);
+/* крупные карты подготовки: пропорция 0.8 (как у всех карт), вертикально со скроллом */
+.prep-row .card.prep-card {
+  width: min(92vw, 260px);
   max-width: none;
-  height: clamp(140px, 25vh, 180px);
+  height: auto;
 }
 #detail-confirm { margin-top: 12px; }
 .lead { color: var(--muted); max-width: 280px; margin: 0; }
@@ -147,7 +153,7 @@ h1 { font-size: var(--fs-xl); margin: 0; letter-spacing: 1px; }
 .end-table .num { text-align: right; font-variant-numeric: tabular-nums; }
 .end-table-total td { font-weight: 700; border-top: 2px solid var(--line); border-bottom: none; }
 .end-table td:first-child { width: 1%; white-space: nowrap; }
-.end-table .card { width: 104px; margin: 0; height: 130px; }
+.end-table .card { width: 104px; margin: 0; height: auto; }
 
 /* ---- prep / choice rows ---- */
 .card-row {
@@ -216,6 +222,28 @@ h1 { font-size: var(--fs-xl); margin: 0; letter-spacing: 1px; }
 #center-card.tappable { cursor: pointer; }
 #play-row { display: flex; align-items: center; justify-content: center; gap: 12px; }
 #center-card .card { touch-action: none; }
+
+/* ---- визуальная колода под картой (толщина + бейдж) ---- */
+#deck-pile { position: relative; display: inline-flex; align-items: center; justify-content: center; }
+#deck-backs { position: absolute; top: 16px; left: 0; right: 0; height: 100%; z-index: 10; pointer-events: none; }
+#deck-backs .card-back { position: absolute; inset: 0; margin: 0; width: 100%; height: 100%; }
+
+.deck-count {
+  position: absolute;
+  right: -10px; bottom: -10px;
+  z-index: 30;
+  min-width: 26px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: var(--ink);
+  color: var(--bg);
+  font-size: var(--fs-sm);
+  font-weight: 800;
+  text-align: center;
+  box-shadow: 0 2px 6px rgba(0,0,0,0.3);
+  pointer-events: none;
+}
+.deck-count.hidden { display: none; }
 
 /* ---- energy / footer ---- */
 .energy {
@@ -288,9 +316,10 @@ h1 { font-size: var(--fs-xl); margin: 0; letter-spacing: 1px; }
   gap: 2px;
   flex: 0 0 auto;
   min-width: 0;
+  width: 96px;
 }
 .btn-choice .lbl { font-size: var(--fs-base); }
-.btn-choice .e { font-size: var(--fs-sm); font-weight: 600; opacity: .92; }
+.btn-choice .e { font-size: var(--fs-sm); font-weight: 600; opacity: .92; white-space: nowrap; }
 .btn-choice.discard { background: transparent; color: var(--muted); }
 .btn-choice.buy { background: transparent; color: var(--accent2); }
 .btn-choice:active { transform: translateY(1px); }
@@ -315,12 +344,13 @@ h1 { font-size: var(--fs-xl); margin: 0; letter-spacing: 1px; }
   border: 1px solid rgba(0,0,0,0.06);
   -webkit-user-select: none;
   user-select: none;
+  aspect-ratio: 0.8;
 }
 .card.compact { width: 116px; }
 .card.detail { width: 240px; max-width: 80vw; }
 .card        { height: 188px; }
-.card.compact{ height: 145px; }
-.card.detail { height: 300px; }
+.card.compact{ height: auto; }
+.card.detail { height: auto; }
 .card.asleep { filter: grayscale(0.8) brightness(0.92); }
 .card.asleep::after {
   content: "😴";
@@ -517,7 +547,7 @@ body.phase-activate .card.activatable {
 
 /* ---- низкая высота: центральная карта не перекрывает энергию ---- */
 @media (max-height: 680px) {
-  .card.detail { width: 200px; height: 248px; }
+  .card.detail { width: 200px; }
   .card.detail .card-img { height: 104px; }
   .card-back { width: 200px; height: 248px; }
   .card-back .back-emblem { font-size: var(--icon-lg); }

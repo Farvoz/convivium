@@ -75,6 +75,47 @@ test('assess: canBuy — булево', async () => {
   const a = tc.assess();
   assert.equal(typeof a.canBuy, 'boolean');
   assert.equal(typeof a.arrow, 'boolean');
+  assert.equal(typeof a.intercepted, 'boolean');
+});
+
+test('assess: нейтральная карта под Олей помечается intercepted', async () => {
+  const { tc } = makeController();
+  tc.newSession(freshDeck());
+  await tc.choosePrep(freshDeck()[0].name);
+  tc.state.game.home = [cardByName('Оля')];
+  tc.state.topCard = cardByName('Тост');
+  tc.state.phase = 'reveal';
+  const a = tc.assess();
+  assert.equal(a.intercepted, true, 'Оля (match:{}) ловит нейтральную карту');
+  assert.equal(a.arrow, false);
+  const owner = C.findInterceptor(tc.state.game, tc.state.topCard);
+  assert.equal(owner.name, 'Оля');
+});
+
+test('assess: без перехватчика нейтральная карта НЕ intercepted', async () => {
+  const { tc } = makeController();
+  tc.newSession(freshDeck());
+  await tc.choosePrep(freshDeck()[0].name);
+  tc.state.game.home = [];
+  tc.state.topCard = cardByName('Тост');
+  tc.state.phase = 'reveal';
+  const a = tc.assess();
+  assert.equal(a.intercepted, false);
+});
+
+test('decide: перехваченная нейтральная карта уходит под Олю без выбора', async () => {
+  const { tc } = makeController();
+  tc.newSession(freshDeck());
+  await tc.choosePrep(freshDeck()[0].name);
+  tc.state.game.home = [cardByName('Оля')];
+  tc.state.game.deck = [cardByName('Тост'), ...tc.state.game.deck];
+  tc.take();
+  const a = tc.assess();
+  assert.equal(a.intercepted, true);
+  const progressed = await tc.decide(null);
+  assert.equal(progressed, true);
+  const olya = tc.state.game.home.find((c) => c.name === 'Оля');
+  assert.ok(olya.attached && olya.attached.some((c) => c.name === 'Тост'), 'Тост лежит под Олей');
 });
 
 test('decide вне фазы reveal — нет прогресса', async () => {
@@ -148,7 +189,7 @@ test('полный прогон до gameover без падений', async () =
     const card = tc.take();
     if (!card) break;
     const a = tc.assess();
-    await tc.decide(a.arrow ? null : (a.canBuy ? 'buy' : 'discard'));
+    await tc.decide(a.arrow || a.intercepted ? null : (a.canBuy ? 'buy' : 'discard'));
     steps++;
   }
   assert.equal(tc.state.phase, 'gameover');

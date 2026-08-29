@@ -221,6 +221,7 @@ function render() {
   if (deckTotal == null) deckTotal = s.deck.length;
   const frac = Math.max(0, Math.min(1, s.deck.length / deckTotal));
   updateBeerGlass(frac, s.deck.length);
+  renderDeckPile(s.deck.length);
 
   const realThreats = s.threat.filter(isThreat).length;
   $('threat-strip').classList.toggle('warn', realThreats >= 3);
@@ -238,6 +239,25 @@ function updateBeerGlass(frac, count) {
   if (beer) beer.style.transform = 'translateY(' + ((1 - frac) * 42) + 'px)';
   const g = $('deck-glass');
   if (g) g.setAttribute('aria-label', 'Осталось карт: ' + count);
+}
+
+// Визуальная колода под картой: стопка рубашек, толщина ~ остатку.
+function renderDeckPile(count) {
+  const backs = $('deck-backs');
+  if (!backs) return;
+  backs.innerHTML = '';
+  const MAX = 6;
+  const n = Math.max(0, Math.min(count, MAX));
+  for (let i = n - 1; i >= 0; i--) {
+    const b = renderCardBack();
+    b.style.transform = 'translate(' + (i * 1.5) + 'px,' + (i * 3) + 'px)';
+    backs.appendChild(b);
+  }
+  const badge = $('deck-count');
+  if (badge) {
+    badge.textContent = count;
+    badge.classList.toggle('hidden', count <= 0);
+  }
 }
 
 function hideArrows() {
@@ -298,7 +318,7 @@ function goPrep() {
   row.innerHTML = '';
   for (const c of top3) {
     const el = CardView(c, {
-      variant: 'compact',
+      variant: 'detail',
       interactive: 'click',
       onClick: () => { pushLog('Открыта: ' + c.name); openDetail(c, { onConfirm: choosePrepUI, confirmLabel: 'Взять в Дом' }); },
     });
@@ -363,8 +383,14 @@ function enableDecisionUI(card) {
   hideArrows();
 
   const a = tc.assess();
-  if (a.arrow) {                   // стрелка — авто без выбора
-    updatePlayInfo(card);
+  const interceptor = a.intercepted ? findInterceptor(tc.state.game, card) : null;
+  if (a.arrow || interceptor) {    // стрелка или перехват — авто без выбора
+    if (interceptor) {
+      $('play-info').innerHTML = '<span class="pos">Перехват</span> — ' + interceptor.name +
+        ' ловит карту, эффект не срабатывает';
+    } else {
+      updatePlayInfo(card);
+    }
     setTimeout(() => submitDecision(null), 720);
     return;
   }

@@ -247,11 +247,13 @@ h1 { font-size: var(--fs-xl); margin: 0; letter-spacing: 1px; }
 
 /* ---- energy / footer ---- */
 .energy {
-  text-align: center;
-  font-size: var(--fs-xl);
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: var(--fs-lg);
   font-weight: 800;
-  min-height: 32px;
   flex-shrink: 0;
+  white-space: nowrap;
 }
 .energy #energy-val { color: var(--accent); }
 #game-footer {
@@ -281,18 +283,6 @@ h1 { font-size: var(--fs-xl); margin: 0; letter-spacing: 1px; }
   gap: 12px;
   width: 100%;
 }
-.play-info {
-  min-height: 18px;
-  font-size: var(--fs-sm);
-  font-weight: 700;
-  color: var(--muted);
-  text-align: center;
-  letter-spacing: .3px;
-}
-.play-info .up { color: var(--threat); }
-.play-info .down { color: var(--accent2); }
-.play-info .pos { color: var(--accent2); }
-.play-info .neg { color: var(--danger); }
 .play-actions {
   display: flex;
   gap: 12px;
@@ -403,6 +393,13 @@ h1 { font-size: var(--fs-xl); margin: 0; letter-spacing: 1px; }
 }
 .card.activatable { cursor: pointer; outline: 2px dashed var(--accent2); }
 .card.clickable { cursor: pointer; }
+.card.targetable { cursor: pointer; outline: 3px solid var(--accent); animation: targetPulse 1s ease-in-out infinite; z-index: 2; }
+.card.cancelable { cursor: pointer; outline: 2px dashed var(--accent); }
+.card.dimmed { opacity: .35; filter: grayscale(.5); pointer-events: none; }
+@keyframes targetPulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(224,122,63,0.45); }
+  50% { box-shadow: 0 0 0 7px rgba(224,122,63,0); }
+}
 
 /* ---- негативные карты: угрозы (↑) и авто (↓) ---- */
 .card.neg { border-top: 3px solid var(--threat); }
@@ -545,7 +542,7 @@ body.phase-activate .card.activatable {
 #detail-card .card-vp,
 #detail-card .detail-hint { text-align: center; }
 
-/* ---- низкая высота: центральная карта не перекрывает энергию ---- */
+/* ---- низкая высота: центр-карта и колода не вылезают в футер (энергия теперь в футере) ---- */
 @media (max-height: 680px) {
   .card.detail { width: 200px; }
   .card.detail .card-img { height: 104px; }
@@ -553,4 +550,22 @@ body.phase-activate .card.activatable {
   .card-back .back-emblem { font-size: var(--icon-lg); }
   #center-area { gap: 8px; }
   .strip { min-height: 150px; }
+}
+
+@media (max-height: 600px) {
+  .card.detail { width: 175px; }
+  .card.detail .card-img { height: 96px; }
+  .card-back { width: 175px; height: 218px; }
+  #center-area { gap: 6px; }
+  .strip { min-height: 120px; }
+  .strip-cards { min-height: 96px; }
+}
+
+@media (max-height: 560px) {
+  .card.detail { width: 150px; }
+  .card.detail .card-img { height: 84px; }
+  .card-back { width: 150px; height: 188px; }
+  #center-area { gap: 4px; }
+  .strip { min-height: 104px; }
+  .strip-cards { min-height: 84px; }
 }

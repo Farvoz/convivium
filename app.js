@@ -55,6 +55,7 @@ let autoTimer = null;
 let logEntries = [];
 let deckTotal = null;
 let tc = null;
+let targetMode = null;
 
 const clearAutoTimer = () => { if (autoTimer) { clearTimeout(autoTimer); autoTimer = null; } };
 
@@ -232,6 +233,48 @@ function render() {
   for (const c of s.home) hw.appendChild(stripCardEl(c));
 
   if (tc.state.phase === 'take' || tc.state.phase === 'activate') showTakePhaseUI();
+  applyTargetMode();
+}
+
+// Режим выбора цели прямым тычком по карте на столе (без оверлея).
+// targetMode = { names:Set, cancelName:string|null, resolve }
+function enterBoardTarget(items, resolve, cancelName) {
+  if (!items || items.length === 0) { resolve(null); return; }
+  targetMode = { names: new Set(items.map((c) => c.name)), cancelName: cancelName || null, resolve };
+  render();
+}
+
+function pickTarget(name) {
+  if (!targetMode) return;
+  const res = targetMode.resolve;
+  targetMode = null;
+  res([...tc.state.game.threat, ...tc.state.game.home].find((c) => c.name === name) || { name });
+}
+
+function cancelTarget() {
+  if (!targetMode) return;
+  const res = targetMode.resolve;
+  targetMode = null;
+  render();
+  res(null);
+}
+
+function applyTargetMode() {
+  if (!targetMode) return;
+  for (const el of document.querySelectorAll('#threat-cards .card, #home-cards .card')) {
+    const n = el.dataset.name;
+    el.onclick = null;
+    el.classList.remove('targetable', 'dimmed', 'cancelable');
+    if (targetMode.names.has(n)) {
+      el.classList.add('targetable');
+      el.onclick = () => pickTarget(n);
+    } else if (targetMode.cancelName && n === targetMode.cancelName) {
+      el.classList.add('cancelable');
+      el.onclick = cancelTarget;
+    } else {
+      el.classList.add('dimmed');
+    }
+  }
 }
 
 function updateBeerGlass(frac, count) {
@@ -372,7 +415,6 @@ function showTakePhaseUI() {
     onTap: () => drawAndReveal(),
     onStart: clearAutoTimer,
   });
-  $('play-info').textContent = '';
 }
 
 
@@ -385,12 +427,6 @@ function enableDecisionUI(card) {
   const a = tc.assess();
   const interceptor = a.intercepted ? findInterceptor(tc.state.game, card) : null;
   if (a.arrow || interceptor) {    // стрелка или перехват — авто без выбора
-    if (interceptor) {
-      $('play-info').innerHTML = '<span class="pos">Перехват</span> — ' + interceptor.name +
-        ' ловит карту, эффект не срабатывает';
-    } else {
-      updatePlayInfo(card);
-    }
     setTimeout(() => submitDecision(null), 720);
     return;
   }
@@ -407,7 +443,6 @@ function enableDecisionUI(card) {
 }
 
 function showActions(canBuy) {
-  $('play-info').textContent = '';
   const buyE = $('buy-e');
   if (buyE) buyE.innerHTML = isBuyFree(tc.state.game, tc.state.topCard)
     ? '<span class="pos">0⚡</span>'
@@ -416,19 +451,6 @@ function showActions(canBuy) {
   $('btn-buy').classList.toggle('hidden', !canBuy);
   $('btn-discard').onclick = () => submitDecision('discard');
   $('btn-buy').onclick = () => submitDecision('buy');
-}
-
-function updatePlayInfo(card) {
-  const info = $('play-info');
-  if (!card) { info.textContent = ''; return; }
-  if (card.arrow === 'up') {
-    info.innerHTML = '<span class="up">⬆ Угроза</span> — уходит в зону угроз';
-  } else if (card.arrow === 'down') {
-    info.innerHTML = '<span class="down">⬇ Авто</span> — сразу в Дом';
-  } else {
-    const buyE = isBuyFree(tc.state.game, card) ? '<span class="pos">0⚡</span>' : '<span class="neg">−' + deriveBuyCost(tc.state.game) + '⚡</span>';
-    info.innerHTML = 'Сброс <span class="pos">+1⚡</span> · Купить ' + buyE;
-  }
 }
 
 function flyDirection(card, action) {
@@ -530,17 +552,13 @@ function ChoiceOverlay(o) {
 
 async function promptChoiceAdapter(payload) {
   if (payload.kind === 'threats') {
-    const threats = payload.items || tc.state.game.threat.slice();
-    return threats.length
-      ? ChoiceOverlay({ title: 'Выбери карту', items: threats })
-      : null;
+    const items = payload.items || tc.state.game.threat.slice();
+    return new Promise((res) => enterBoardTarget(items, res, payload.source || null));
   }
   if (payload.kind === 'persons') {
     const match = payload.match || {};
-    const persons = tc.state.game.home.filter((c) => matches(tc.state.game, c, match));
-    return persons.length
-      ? ChoiceOverlay({ title: 'Подложить под кого?', items: persons })
-      : null;
+    const items = tc.state.game.home.filter((c) => matches(tc.state.game, c, match));
+    return new Promise((res) => enterBoardTarget(items, res, null));
   }
   if (payload.kind === 'reorder') {
     const n = Math.min(payload.count || 0, tc.state.game.deck.length);
@@ -550,9 +568,7 @@ async function promptChoiceAdapter(payload) {
   }
   if (payload.kind === 'interceptors') {
     const items = payload.items || [];
-    return items.length
-      ? ChoiceOverlay({ title: 'Кто ловит карту?', items })
-      : null;
+    return new Promise((res) => enterBoardTarget(items, res, null));
   }
   return null;
 }

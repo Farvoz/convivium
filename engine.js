@@ -40,6 +40,7 @@ const OP_REGISTRY = {
     validate() {},
     run(game, source, e) {
       const t = cloneThreatTemplate(game);
+      if (!t) return; // нет свободной Угрозы — не создаём дубль
       t.faceDown = true;
       const idx = Math.floor(game.rng() * (game.deck.length + 1));
       game.deck.splice(idx, 0, t);
@@ -68,7 +69,7 @@ const OP_REGISTRY = {
     kind: 'action', when: 'enter', phaseable: true,
     validate(e, where) { validateMatch(e.filter, where + '.discardTarget'); },
     run(game, source, e) {
-      const pool = game.threat.filter((c) => matches(game, c, e.filter || {}, 'threat'));
+      const pool = game.threat.filter((c) => c.threat !== false && matches(game, c, e.filter || {}, 'threat'));
       if (pool.length) {
         const chosen = game.choose(pool);
         detachAttachments(game, chosen);
@@ -498,7 +499,22 @@ function applyPhaseActions(g, phase) {
 // --- шаблон угрозы для pullReserve ----------------------------------------
 
 function cloneThreatTemplate(game) {
-  const threats = CARDS.filter(isThreat);
+  // Резервная Угроза не должна дублировать карту, уже присутствующую в игре.
+  // Учитываем ВСЕ карты, включая вложенные (attached/accumulated), иначе
+  // накопленная под Палёным алкоголем Угроза не считалась бы «присутствующей»
+  // и pullReserve добавил бы её копию (дубль Дня рождения! и пр.).
+  // Если свободных Угроз нет — возвращаем null (pullReserve пропускает добавление).
+  const present = new Set();
+  const walk = (cards) => {
+    for (const c of cards) {
+      present.add(c.name);
+      if (c.attached) walk(c.attached);
+      if (c.accumulated) walk(c.accumulated);
+    }
+  };
+  walk(game.deck); walk(game.home); walk(game.threat); walk(game.discard);
+  const threats = CARDS.filter(isThreat).filter((c) => !present.has(c.name));
+  if (!threats.length) return null;
   const t = threats[Math.floor(game.rng() * threats.length)];
   return cloneCard(t);
 }

@@ -127,16 +127,18 @@
       if (needsTarget) {
         const dt = (card.activate || []).find((e) => e.op === 'discardTarget');
         const targetPool = dt
-          ? state.game.threat.filter((c) => matches(state.game, c, dt.filter || {}, 'threat'))
+          ? state.game.threat.filter((c) => c.threat !== false && matches(state.game, c, dt.filter || {}, 'threat'))
           : [];
-        if (targetPool.length) {
-          chosen = await promptChoice({ kind: 'threats', items: targetPool });
-          if (chosen === null) return;
+        if (targetPool.length === 0) {
+          log('Нечего сбросить — активация отменена');
+          return;
+        }
+        chosen = await promptChoice({ kind: 'threats', items: targetPool, source: card.name });
+        if (chosen === null) return;
           // chosen — объект из доне-клонового state.game; движок клонирует игру,
           // поэтому матчим по имени внутри уже склонированного пула, иначе
           // removeFromZone не находит карту по ссылке и сброс не происходит.
           state.game.choose = (opts) => opts.find((c) => c.name === chosen.name) || opts[0];
-        }
       }
       if (needsReorder) {
         const op = (card.activate || []).find((e) => e.op === 'peekReorder');

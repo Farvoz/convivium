@@ -6,7 +6,7 @@ import './cards.js';
 import './engine.js';
 const { cards } = globalThis;
 const {
-  createGame, setup, takeTurn, runTurnStart, resolveTop, getScore, getState, activate, deriveThreatCount, deriveScoreBreakdown, deriveBuyCost, validateCards, checkAttachInvariant, cloneCard,
+  createGame, setup, takeTurn, runTurnStart, resolveTop, getScore, getState, activate, deriveThreatCount, deriveScoreBreakdown, deriveBuyCost, validateCards, checkAttachInvariant, cloneCard, buildDeck,
 } = globalThis.Convivium;
 
 // ---- helpers -------------------------------------------------------------
@@ -115,7 +115,7 @@ test('C1: пустая колода — победа, счёт = сумма ПО
 
 test('C2: Обход + 3 Угрозы в конце хода — поражение, счёт 0', () => {
   let game = makeGame(
-    ['Ваня', 'Оля', 'Денис', 'Шум', 'Порванная струна', 'Шум', 'Обход', 'Шум'],
+    ['Ваня', 'Оля', 'Денис', 'Шум', 'Порванная струна', 'Грязь', 'Обход'],
     'Ваня'
   );
   game = runToEnd(game, 'discard');
@@ -126,7 +126,7 @@ test('C2: Обход + 3 Угрозы в конце хода — поражен�
 
 test('C3: Обход сам не считается Угрозой для счётчика', () => {
   let game = makeGame(
-    ['Ваня', 'Оля', 'Денис', 'Шум', 'Обход', 'Шум'],
+    ['Ваня', 'Оля', 'Денис', 'Шум', 'Обход', 'Порванная струна'],
     'Ваня'
   );
   game = runToEnd(game, 'discard');
@@ -148,7 +148,7 @@ test('D1: Кровать накрывает самого левого челов
 
 test('D2: Палёный алкоголь копит по 1 карте с верха каждый ход, при 3 сбрасывает себя и кучу', () => {
   let game = makeGame(
-    ['Ваня', 'Оля', 'Денис', 'Палёный алкоголь', 'Комната 402', 'Тост', 'Оля', 'Денис', '3-й сосед'],
+    ['Ваня', 'Оля', 'Денис', 'Палёный алкоголь', 'Комната 402', 'Тост', 'Плов', 'Паша', '3-й сосед'],
     'Ваня'
   );
   game = takeTurn(game, 'discard');
@@ -202,6 +202,31 @@ test('D4c: Паша заменяет Паша: бухой, если бухой �
   const s = getState(after);
   assert.equal(s.home.find((c) => c.name === 'Паша: бухой'), undefined);
   assert.ok(s.home.find((c) => c.name === 'Паша'));
+});
+
+test('D4d: pullReserve не дублирует уже присутствующую карту (День рождения!)', () => {
+  // День рождения! — один экземпляр в колоде; Паша: бухой замешивает резервную
+  // Угрозу, но не вторую День рождения!.
+  const g = createGame({
+    deck: [cloneCard(byName['Паша: бухой']), cloneCard(byName['День рождения!'])],
+    rng: () => 0.99,
+  });
+  g.home = [cloneCard(byName['Паша'])];
+  g.energy = 2;
+  let game = takeTurn(g, 'buy');
+  const s = getState(game);
+  const names = [...s.deck, ...s.home, ...s.threat, ...s.discard].map((c) => c.name);
+  assert.equal(names.filter((n) => n === 'День рождения!').length, 1, 'День рождения! не должен дублироваться');
+  assertInvariants(game);
+  // доводим партию до конца — уникальность сохраняется
+  let guard = 0;
+  while (game.status === 'playing' && guard++ < 100) {
+    const cost = deriveBuyCost(game);
+    game = takeTurn(game, getState(game).energy >= cost ? 'buy' : 'discard');
+    assertInvariants(game);
+  }
+  const finalNames = [...game.deck, ...game.home, ...game.threat, ...game.discard].map((c) => c.name);
+  assert.equal(finalNames.filter((n) => n === 'День рождения!').length, 1, 'День рождения! не должен дублироваться до конца игры');
 });
 
 test('D5: Звёздный час под гитаристом даёт +1 ПО', () => {
@@ -341,13 +366,13 @@ test('L1: Грязь (arrow up) уходит в Зону Угрозы и пов�
 
 // ---- M. Денис (перехват угрозы/авто под себя) ----------------------------
 
-test('M1: Денис перехватывает следующую угрозу под себя, эффект Шума не считается', () => {
-  let game = makeGame(['Ваня', 'Оля', 'Денис', 'Шум', 'Шум', 'Шум'], 'Денис');
+test('M1: Денис перехватывает следующую угрозу под себя, эффект не считается', () => {
+  let game = makeGame(['Ваня', 'Оля', 'Денис', 'Шум', 'Грязь', 'Конфликт'], 'Денис');
   game = runToEnd(game, 'discard');
   const s = getState(game);
   const denis = s.home.find((c) => c.name === 'Денис');
   assert.ok(denis.attached && denis.attached.some((a) => a.name === 'Шум'), 'Шум должен быть под Денисом');
-  assert.equal(s.threat.filter((c) => c.name === 'Шум').length, 2, 'только 2 Шума в Зоне Угрозы');
+  assert.equal(s.threat.length, 2, 'ровно 2 Угрозы в Зоне (перехваченный Шум не в зоне)');
   assert.equal(deriveThreatCount(game), 2, 'перехваченный Шум не считается угрозой');
 });
 
@@ -389,12 +414,12 @@ test('M5: Денис не перехватывает нейтральную ка
 // ---- N. Оля (ловит любую следующую карту под себя, эффект не срабатывает) --
 
 test('N1: Оля ловит следующую угрозу под себя, эффект не считается', () => {
-  let game = makeGame(['Ваня', 'Оля', 'Денис', 'Шум', 'Шум', 'Шум'], 'Оля');
+  let game = makeGame(['Ваня', 'Оля', 'Денис', 'Шум', 'Грязь', 'Конфликт'], 'Оля');
   game = runToEnd(game, 'discard');
   const s = getState(game);
   const olya = s.home.find((c) => c.name === 'Оля');
   assert.ok(olya.attached && olya.attached.some((a) => a.name === 'Шум'), 'Шум должен быть под Олей');
-  assert.equal(s.threat.filter((c) => c.name === 'Шум').length, 2, 'только 2 Шума в Зоне Угрозы');
+  assert.equal(s.threat.length, 2, 'ровно 2 Угрозы в Зоне (перехваченный Шум не в зоне)');
   assert.equal(deriveThreatCount(game), 2, 'перехваченный Шум не считается угрозой');
 });
 
@@ -448,7 +473,7 @@ test('N5: не-мужчина под Олей не даёт бонуса ПО', 
 
 test('L1b: при 3+ энергии покупка под Грязь тратит ровно 3', () => {
   let game = makeGame(
-    ['Ваня', 'Оля', 'Денис', 'Грязь', 'Комната 402', 'Комната 402'],
+    ['Ваня', 'Оля', 'Денис', 'Грязь', 'Комната 402', 'Дворик'],
     'Ваня'
   );
   game = takeTurn(game, 'buy');   // Грязь -> Дом, energy 2
@@ -470,7 +495,7 @@ test('L1c: deriveBuyCost равен 2 без Грязь и 3 с Грязь', () 
 
 test('L2: Грязь считается Угрозой для Обхода (3 угрозы -> поражение)', () => {
   let game = makeGame(
-    ['Ваня', 'Оля', 'Денис', 'Шум', 'Грязь', 'Шум', 'Обход'],
+    ['Ваня', 'Оля', 'Денис', 'Шум', 'Грязь', 'Порванная струна', 'Обход'],
     'Ваня'
   );
   game = runToEnd(game, 'discard');
@@ -556,6 +581,20 @@ function assertInvariants(game) {
     seen.add(c);
   }
 
+  // Все карты в игре уникальны по имени (дубли запрещены — см. День рождения!).
+  // Учитываем вложенные (attached/accumulated), иначе перехваченная/накопленная
+  // карта не считалась бы и дубль прошёл бы незамеченным.
+  const nameSeen = new Set();
+  const walkNames = (cards) => {
+    for (const c of cards) {
+      assert.ok(!nameSeen.has(c.name), `duplicate card name in game: ${c.name}`);
+      nameSeen.add(c.name);
+      if (c.attached) walkNames(c.attached);
+      if (c.accumulated) walkNames(c.accumulated);
+    }
+  };
+  walkNames(s.deck); walkNames(s.home); walkNames(s.threat); walkNames(s.discard);
+
   const realThreats = s.threat.filter((c) => c.arrow === 'up' && c.threat !== false);
   assert.ok(!s.threat.some((c) => c.name === 'Обход' && c.arrow === 'up' && c.threat !== false), 'Обход учтён как Угроза');
 
@@ -588,7 +627,7 @@ test('E1: инварианты держатся в ручной партии (п
 
 test('E2: инварианты держатся при накоплении Палёного алкоголя', () => {
   let game = makeGame(
-    ['Ваня', 'Оля', 'Денис', 'Палёный алкоголь', 'Комната 402', 'Тост', 'Денис', 'Оля'],
+    ['Ваня', 'Оля', 'Денис', 'Палёный алкоголь', 'Комната 402', 'Тост', '3-й сосед', 'Плов'],
     'Ваня'
   );
   game = takeTurn(game, 'discard');
@@ -633,11 +672,14 @@ const CARD_POOL = cards.map((c) => c.name);
 
 function simulate(seed) {
   const rng = lcg(seed);
-  const n = 20 + Math.floor(rng() * 25);
-  const order = [];
-  for (let i = 0; i < n; i++) {
-    order.push(CARD_POOL[Math.floor(rng() * CARD_POOL.length)]);
+  // Колода без повторов имён (как в реальной игре через buildDeck).
+  const pool = [...CARD_POOL];
+  for (let i = pool.length - 1; i > 0; i--) {
+    const j = Math.floor(rng() * (i + 1));
+    [pool[i], pool[j]] = [pool[j], pool[i]];
   }
+  const n = Math.min(pool.length, 20 + Math.floor(rng() * 25));
+  const order = pool.slice(0, n);
   const top3 = order.slice(0, 3);
   const choose = top3[Math.floor(rng() * 3)];
   let game = makeGame(order, choose, rng);
@@ -663,6 +705,22 @@ test('F1: fuzz — 300 случайных партий сохраняют инв
 });
 
 // ---- G. Метаморфное / детерминизм ----------------------------------------
+
+test('U1: buildDeck + полная партия — имена карт уникальны во всех зонах', () => {
+  for (let seed = 1; seed <= 50; seed++) {
+    const rng = lcg(seed);
+    const deck = buildDeck({}, rng).map(cloneCard);
+    let game = createGame({ deck, rng });
+    game = setup(game, { choose: (opts) => opts[0] });
+    assertInvariants(game);
+    let turns = 0;
+    while (game.status === 'playing' && turns++ < 5000) {
+      const cost = deriveBuyCost(game);
+      game = takeTurn(game, getState(game).energy >= cost ? 'buy' : 'discard');
+      assertInvariants(game);
+    }
+  }
+});
 
 test('G1: детерминизм — тот же seed даёт идентичный финал', () => {
   const a = simulate(424242);
@@ -714,11 +772,11 @@ const GOLDEN = [
   },
   {
     id: 'threatWeight+loseIf', card: 'Шура: бухой + Обход',
-    order: ['Ваня', 'Оля', 'Денис', 'Шум', 'Шура: бухой', 'Шум', 'Обход'], choose: 'Ваня',
+    order: ['Ваня', 'Оля', 'Денис', 'Шум', 'Шура: бухой', 'Порванная струна', 'Обход'], choose: 'Ваня',
     run: (g) => { while (g.status === 'playing') g = takeTurn(g, 'discard'); return g; },
     expect: (g) => {
       const s = getState(g);
-      assert.equal(deriveThreatCount(g), 4); // 2 Шум по весу 2
+      assert.equal(deriveThreatCount(g), 3); // Шум по весу 2 + Порванная струна
       assert.equal(s.status, 'lost');
       assert.equal(getScore(g), 0);
     },
@@ -746,7 +804,7 @@ const GOLDEN = [
   },
   {
     id: 'accumulate', card: 'Палёный алкоголь',
-    order: ['Ваня', 'Оля', 'Денис', 'Палёный алкоголь', 'Комната 402', 'Тост', 'Оля', 'Денис', '3-й сосед'],
+    order: ['Ваня', 'Оля', 'Денис', 'Палёный алкоголь', 'Комната 402', 'Тост', 'Плов', 'Паша', '3-й сосед'],
     choose: 'Ваня',
     run: (g) => { for (let i = 0; i < 4; i++) g = takeTurn(g, 'discard'); return g; },
     expect: (g) => {
@@ -826,7 +884,7 @@ const GOLDEN = [
   },
   {
     id: 'scorePerPerson', card: 'Большая вечеринка',
-    order: ['Ваня', 'Оля', 'Денис', 'Большая вечеринка', 'Комната 402', 'Оля', 'Денис'],
+    order: ['Ваня', 'Оля', 'Денис', 'Большая вечеринка', 'Комната 402', 'Плов', '3-й сосед'],
     choose: 'Ваня',
     run: (g) => {
       while (g.status === 'playing') {
@@ -850,7 +908,7 @@ const GOLDEN = [
   },
   {
     id: 'loseIf', card: 'Обход',
-    order: ['Ваня', 'Оля', 'Денис', 'Шум', 'Порванная струна', 'Шум', 'Обход', 'Шум'],
+    order: ['Ваня', 'Оля', 'Денис', 'Шум', 'Порванная струна', 'Грязь', 'Обход'],
     choose: 'Ваня',
     run: (g) => { while (g.status === 'playing') g = takeTurn(g, 'discard'); return g; },
     expect: (g) => {
@@ -874,8 +932,23 @@ const GOLDEN = [
     },
   },
   {
+    id: 'discardTarget(activate): Обход не сбрасывается', card: 'Старшекур',
+    order: ['Ваня', 'Оля', 'Денис', 'Старшекур', 'Обход', 'Комната 402'], choose: 'Ваня',
+    run: (g) => {
+      g = takeTurn(g, 'buy');
+      g = takeTurn(g, 'discard');
+      g = activate(g, 'Старшекур');
+      return g;
+    },
+    expect: (g) => {
+      const s = getState(g);
+      assert.ok(s.threat.some((c) => c.name === 'Обход'), 'Обход остаётся в зоне угроз');
+      assert.equal(s.discard.some((c) => c.name === 'Обход'), false, 'Обход не попал в сброс');
+    },
+  },
+  {
     id: 'peekReorder(activate)', card: 'Массовый перекур',
-    order: ['Ваня', 'Оля', 'Денис', 'Массовый перекур', 'Комната 402', 'Тост', 'Денис'],
+    order: ['Ваня', 'Оля', 'Денис', 'Массовый перекур', 'Комната 402', 'Тост', 'Плов'],
     choose: 'Ваня',
     run: (g) => {
       g = takeTurn(g, 'discard');

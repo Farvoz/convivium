@@ -991,6 +991,24 @@ test('J4: peekReorder через game.reorder реально меняет пор
   assert.notEqual(afterDeck, before, 'порядок верхних карт изменился');
 });
 
+test('J5: peekReorder с reorder, вернувшим [] (дефектный промпт), НЕ опустошает колоду и не даёт победу', () => {
+  const g = createGame({ deck: [cloneCard(byName['Комната 402']), cloneCard(byName['Тост']), cloneCard(byName['Плов'])] });
+  g.home = [cloneCard(byName['Ваня']), cloneCard(byName['Массовый перекур'])];
+  g.reorder = () => [];
+  const after = activate(g, 'Массовый перекур');
+  assert.equal(after.deck.length, 3, 'колода не укоротилась при пустом reorder');
+  assert.equal(after.status, 'playing', 'не должно быть ложной победы');
+});
+
+test('J6: peekReorder с reorder, вернувшим неверное число карт, сохраняет длину колоды', () => {
+  const g = createGame({ deck: [cloneCard(byName['Комната 402']), cloneCard(byName['Тост']), cloneCard(byName['Плов'])] });
+  g.home = [cloneCard(byName['Ваня']), cloneCard(byName['Массовый перекур'])];
+  g.reorder = (top) => [top[0]]; // вернул меньше, чем взял
+  const after = activate(g, 'Массовый перекур');
+  assert.equal(after.deck.length, 3, 'колода той же длины (fallback на top)');
+  assert.equal(after.status, 'playing', 'статус playing');
+});
+
 // ---- I. Иммутабельность / строгие фазы / валидация -----------------------
 
 test('I1: takeTurn не мутирует входной game', () => {

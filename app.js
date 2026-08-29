@@ -17,14 +17,14 @@ const {
 // Данные отображения
 // ---------------------------------------------------------------------------
 const FACE_MAP = {
-  'Ваня': 'faces/face_vanya.png',
-  'Оля': 'faces/face_olya.png',
-  'Денис': 'faces/face_den.png',
-  'Шура': 'faces/face_shurik.png',
-  'Шура: бухой': 'faces/face_shurik.png',
-  'Паша': 'faces/face_pavel.png',
-  'Паша: бухой': 'faces/face_pavel.png',
-  '3-й сосед': 'faces/face_vova.png',
+  'Ваня': 'faces/face_vanya.jpg',
+  'Оля': 'faces/face_olya.jpg',
+  'Денис': 'faces/face_den.jpg',
+  'Шура': 'faces/face_shurik.jpg',
+  'Шура: бухой': 'faces/face_shurik.jpg',
+  'Паша': 'faces/face_pavel.jpg',
+  'Паша: бухой': 'faces/face_pavel.jpg',
+  '3-й сосед': 'faces/face_vova.jpg',
 };
 const ICON_MAP = {
   'Обход': '🚪', 'Комната 402': '🚪', 'Дворик': '🏡', 'Порванная струна': '🎸', 'Шум': '📢',
@@ -45,16 +45,6 @@ function vpStars(vp) {
   if (n === 0) return '';
   const stars = '★'.repeat(n);
   return vp < 0 ? `<span class="neg">−${stars}</span>` : stars;
-}
-
-function effectIcons(card) {
-  const out = [];
-  if (card.cost === '🔄') out.push('🔄');
-  if (card.attach) out.push('📎');
-  if ((card.effects || []).some((e) => e.op === 'intercept')) out.push('🫳');
-  if (card.sleep) out.push('😴');
-  if ((card.effects || []).some((e) => e.op === 'accumulate' || e.when === 'turnStart')) out.push('⚡');
-  return out;
 }
 
 // ---------------------------------------------------------------------------
@@ -149,21 +139,13 @@ function renderCardEl(card, { compact = false, detail = false } = {}) {
   }
   if (meta.childNodes.length) head.appendChild(meta);
 
-  const eff = effectIcons(card);
-  if (!compact && eff.length) {
-    const eb = document.createElement('div');
-    eb.className = 'card-effect-bar';
-    eb.textContent = eff.join(' ');
-    body.appendChild(eb);
-  }
-
   if (!compact && card.description) {
     const d = document.createElement('div');
     d.className = 'card-desc';
     if ((card.effects || []).some((e) => e.op === 'intercept')) {
       const badge = document.createElement('span');
       badge.className = 'intercept-badge';
-      badge.textContent = '🫳';
+      badge.textContent = '🤚';
       d.appendChild(badge);
     }
     d.appendChild(document.createTextNode(card.description));
@@ -522,9 +504,9 @@ function ChoiceOverlay(o) {
 
 async function promptChoiceAdapter(payload) {
   if (payload.kind === 'threats') {
-    const threats = tc.state.game.threat.slice();
+    const threats = payload.items || tc.state.game.threat.slice();
     return threats.length
-      ? ChoiceOverlay({ title: 'Выбери угрозу', items: threats })
+      ? ChoiceOverlay({ title: 'Выбери карту', items: threats })
       : null;
   }
   if (payload.kind === 'persons') {

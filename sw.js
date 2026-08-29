@@ -3,8 +3,8 @@ const CACHE = 'convivium-' + VERSION;
 const ASSETS = [
   './', './index.html', './style.css', './app.js', './cards.js', './engine.js',
   './manifest.webmanifest', './icon.svg',
-  './faces/face_vanya.png', './faces/face_olya.png', './faces/face_den.png',
-  './faces/face_shurik.png', './faces/face_pavel.png', './faces/face_vova.png',
+  './faces/face_vanya.jpg', './faces/face_olya.jpg', './faces/face_den.jpg',
+  './faces/face_shurik.jpg', './faces/face_pavel.jpg', './faces/face_vova.jpg',
 ];
 
 self.addEventListener('install', (e) => {

@@ -96,7 +96,11 @@ const OP_REGISTRY = {
       const n = Math.min(e.count || 0, game.deck.length);
       if (n < 1) return;
       const top = game.deck.splice(0, n);
-      const ordered = (typeof game.reorder === 'function') ? game.reorder(top) : top;
+      const cb = (typeof game.reorder === 'function') ? game.reorder(top) : top;
+      // Защита: reorder должен вернуть ровно n карт. Иначе колода молча
+      // укорачивается (вплоть до опустошения -> ложная победа). Возвращаем
+      // исходный top без изменения порядка — колода остаётся целой.
+      const ordered = (Array.isArray(cb) && cb.length === top.length) ? cb : top;
       game.deck.unshift(...ordered);
     },
   },

@@ -13,7 +13,7 @@
 - `index.html` — точка входа, подключает `cards.js` → `engine.js` → `app.js`;
 - `app.js` — браузерный UI-слой (IIFE, берёт globals из `cards.js`/`engine.js`);
 - `style.css` — стили, мобильная вёрстка;
-- `faces/` - картинки персонажей (`face_*.png`);
+- `faces/` - картинки персонажей (`face_*.jpg`);
 - `sw.js` — service worker (PWA, регистрируется только на `https`);
 - `manifest.webmanifest` — PWA-манифест;
 - `icon.svg` — иконка приложения / Apple touch icon;

@@ -8,13 +8,13 @@ import { test } from 'node:test';
 import assert from 'node:assert';
 const C = globalThis.Convivium;
 
-function makeController() {
+function makeController(prompt) {
   const log = [];
   return {
     tc: C.createTurnController({
       render: () => {},
       log: (m) => log.push(m),
-      promptChoice: async () => null,
+      promptChoice: prompt || (async () => null),
     }),
     log,
   };
@@ -22,6 +22,22 @@ function makeController() {
 
 function freshDeck() {
   return globalThis.cards.map(C.cloneCard);
+}
+
+function cardByName(name) {
+  return C.cloneCard(globalThis.cards.find((c) => c.name === name));
+}
+
+// promptChoice, возвращающий первую валидную цель из пула угроз.
+function threatsPrompt() {
+  return async (payload) => (payload.kind === 'threats' && payload.items ? payload.items[0] : null);
+}
+
+// Ставит карту(ы) в Дом/зону угроз и переводит контроллер в фазу активации.
+function setupActivate(tc, { home = [], threat = [] } = {}) {
+  tc.state.game.home = home.map(cardByName);
+  tc.state.game.threat = threat.map(cardByName);
+  tc.state.phase = 'activate';
 }
 
 test('newSession: phase prep и игра создана', () => {
@@ -89,6 +105,40 @@ test('activate вне фазы activate — нет прогресса', async ()
   assert.ok(tc.state.phase === 'take' || tc.state.phase === 'activate');
 });
 
+test('Старшекур активация: выбранная угроза уходит в сброс', async () => {
+  const { tc } = makeController(threatsPrompt());
+  tc.newSession(freshDeck());
+  await tc.choosePrep(freshDeck()[0].name);
+  setupActivate(tc, { home: ['Старшекур'], threat: ['Шум'] });
+  await tc.activate('Старшекур');
+  const names = tc.state.game.discard.map((c) => c.name);
+  assert.ok(names.includes('Шум'), 'Шум должен быть в сбросе');
+  assert.ok(names.includes('Старшекур'), 'Старшекур должен уйти в сброс после 🔄');
+  assert.ok(!tc.state.game.threat.some((c) => c.name === 'Шум'), 'Шум покинул зону угроз');
+});
+
+test('Натянуть струну активация: Порванная струна сбрасывается при гитаристе', async () => {
+  const { tc } = makeController(threatsPrompt());
+  tc.newSession(freshDeck());
+  await tc.choosePrep(freshDeck()[0].name);
+  setupActivate(tc, { home: ['Натянуть струну', 'Ваня'], threat: ['Порванная струна'] });
+  await tc.activate('Натянуть струну');
+  const names = tc.state.game.discard.map((c) => c.name);
+  assert.ok(names.includes('Порванная струна'), 'Порванная струна в сбросе');
+  assert.ok(names.includes('Натянуть струну'), 'Натянуть струну в сбросе');
+  assert.ok(tc.state.game.home.some((c) => c.name === 'Ваня'), 'Ваня остался в Дому');
+});
+
+test('Натянуть струну без гитариста: эффект не срабатывает', async () => {
+  const { tc } = makeController(threatsPrompt());
+  tc.newSession(freshDeck());
+  await tc.choosePrep(freshDeck()[0].name);
+  setupActivate(tc, { home: ['Натянуть струну'], threat: ['Порванная струна'] });
+  await tc.activate('Натянуть струну');
+  assert.ok(!tc.state.game.discard.some((c) => c.name === 'Порванная струна'), 'Порванная струна не сброшена');
+  assert.ok(tc.state.game.threat.some((c) => c.name === 'Порванная струна'), 'Порванная струна осталась в зоне угроз');
+});
+
 test('полный прогон до gameover без падений', async () => {
   const { tc } = makeController();
   tc.newSession(freshDeck());
@@ -104,3 +154,4 @@ test('полный прогон до gameover без падений', async () =
   assert.equal(tc.state.phase, 'gameover');
   assert.ok(['won', 'lost'].includes(tc.state.game.status));
 });
+

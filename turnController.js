@@ -124,14 +124,28 @@
       const needsReorder = (card.activate || []).some((e) => e.op === 'peekReorder');
       let chosen = null;
       if (needsTarget) {
-        chosen = await promptChoice({ kind: 'threats' });
-        if (chosen === null) return;
-        state.game.choose = () => chosen;
+        const dt = (card.activate || []).find((e) => e.op === 'discardTarget');
+        const targetPool = dt
+          ? state.game.threat.filter((c) => matches(state.game, c, dt.filter || {}, 'threat'))
+          : [];
+        if (targetPool.length) {
+          chosen = await promptChoice({ kind: 'threats', items: targetPool });
+          if (chosen === null) return;
+          // chosen — объект из доне-клонового state.game; движок клонирует игру,
+          // поэтому матчим по имени внутри уже склонированного пула, иначе
+          // removeFromZone не находит карту по ссылке и сброс не происходит.
+          state.game.choose = (opts) => opts.find((c) => c.name === chosen.name) || opts[0];
+        }
       }
       if (needsReorder) {
         const op = (card.activate || []).find((e) => e.op === 'peekReorder');
-        const ordered = await promptChoice({ kind: 'reorder', count: op.count || 3 });
-        state.game.reorder = (top) => ordered;
+        const n = Math.min(op.count || 3, state.game.deck.length);
+        const items = state.game.deck.slice(0, n);
+        const ordered = await promptChoice({ kind: 'reorder', count: op.count || 3, items });
+        // reorder обязан вернуть ровно n карт; иначе не меняем порядок колоды.
+        if (Array.isArray(ordered) && ordered.length === n) {
+          state.game.reorder = (top) => ordered;
+        }
       }
       const before = state.game;
       state.game = engineActivate(state.game, name);
@@ -139,6 +153,11 @@
       state.game.choose = (opts) => opts[0];
       state.game.reorder = (top) => top;
       log('Активировано: ' + name);
+      if (state.game.status !== 'playing') {
+        state.phase = 'gameover';
+        render();
+        return;
+      }
       if (collectActivatable().length === 0) {
         state.phase = 'take';
       }

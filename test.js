@@ -184,20 +184,22 @@ test('D4: Паша: бухой заменяет Пашу и замешивает
 });
 
 test('D4b: Шура заменяет Шура: бухой, если бухой уже в игре (симметрия)', () => {
-  let game = makeGame(['Оля', 'Денис', 'Шура: бухой', 'Шура'], 'Оля');
-  game = takeTurn(game, 'buy'); // Шура: бухой -> Дом
-  game = takeTurn(game, 'buy'); // Шура заходит после бухого -> заменяет
-  const s = getState(game);
+  const g = createGame({ deck: [cloneCard(byName['Шура'])] });
+  g.home = [cloneCard(byName['Шура: бухой'])];
+  g.energy = 2;
+  const after = takeTurn(g, 'buy'); // Шура заходит -> заменяет Шура: бухой
+  const s = getState(after);
   assert.equal(s.home.find((c) => c.name === 'Шура: бухой'), undefined);
   assert.ok(s.home.find((c) => c.name === 'Шура'));
 });
 
 test('D4c: Паша заменяет Паша: бухой, если бухой уже в игре (симметрия)', () => {
   // rng=0.99 -> pullReserve кладёт Угрозу ПОСЛЕ Паши, чтобы Паша гарантированно дотянулась
-  let game = makeGame(['Оля', 'Денис', 'Паша: бухой', 'Паша'], 'Оля', () => 0.99);
-  game = takeTurn(game, 'buy'); // Паша: бухой -> Дом (+замешивает Угрозу)
-  game = takeTurn(game, 'buy'); // Паша заходит после бухого -> заменяет
-  const s = getState(game);
+  const g = createGame({ deck: [cloneCard(byName['Паша'])], rng: () => 0.99 });
+  g.home = [cloneCard(byName['Паша: бухой'])];
+  g.energy = 2;
+  const after = takeTurn(g, 'buy'); // Паша заходит -> заменяет Паша: бухой
+  const s = getState(after);
   assert.equal(s.home.find((c) => c.name === 'Паша: бухой'), undefined);
   assert.ok(s.home.find((c) => c.name === 'Паша'));
 });
@@ -262,15 +264,67 @@ test('D7: Натянуть струну (🔄) сбрасывает Порван
 });
 
 test('D8: Большая вечеринка даёт +1 ПО за каждого человека в игре (в конце)', () => {
-  let game = makeGame(
-    ['Ваня', 'Оля', 'Денис', 'Комната 402', 'Оля', 'Денис', 'Большая вечеринка'],
-    'Ваня'
+  // Без Оли/Дениса в колоде, чтобы перехват не искажал подсчёт персон
+  const g = createGame({ deck: [cloneCard(byName['Большая вечеринка'])] });
+  g.home = [
+    cloneCard(byName['Ваня']), cloneCard(byName['Паша']), cloneCard(byName['3-й сосед']),
+  ];
+  g.energy = 2;
+  const after = takeTurn(g, 'buy'); // Большая вечеринка -> Дом
+  const s = getState(after);
+  assert.ok(s.home.find((c) => c.name === 'Большая вечеринка'), 'Большая вечеринка в игре');
+  // persons: Ваня + Паша + 3-й сосед = 3 => scorePerPerson +3; их ПО: Ваня 1, Паша 0, 3-й 0 => 4
+  assert.equal(getScore(after), 4);
+});
+
+// ---- P. Механика place (ликвидация угрозы + замешивание + 1 место) --------
+
+test('P1: покупка Комнаты 402 сбрасывает Порванную струну, замешивает Шум, оставляет Обход', () => {
+  let game = makeGame(['Ваня', 'Оля', 'Денис', 'Комната 402'], 'Ваня');
+  game.threat = [
+    cloneCard(byName['Порванная струна']),
+    cloneCard(byName['Шум']),
+    cloneCard(byName['Обход']),
+  ];
+  game.energy = 2;
+  game = takeTurn(game, 'buy');
+  const s = getState(game);
+  assert.equal(s.threat.find((c) => c.name === 'Порванная струна'), undefined, 'Порванная струна сброшена');
+  assert.ok(s.discard.some((c) => c.name === 'Порванная струна'), 'Порванная струна в сбросе');
+  assert.equal(s.threat.find((c) => c.name === 'Шум'), undefined, 'Шум ушёл из зоны');
+  assert.ok(s.deck.some((c) => c.name === 'Шум'), 'Шум замешивается в колоду');
+  assert.ok(s.threat.some((c) => c.name === 'Обход'), 'Обход остаётся в зоне (не isThreat)');
+  assert.ok(s.home.some((c) => c.name === 'Комната 402'), 'место в Доме');
+  assert.equal(s.home.filter((c) => c.tags && c.tags.includes('place')).length, 1, 'ровно 1 место в Доме');
+});
+
+test('P2: покупка Дворика замешивает старую Комнату 402 (replace), сбрасывает Шум', () => {
+  let game = makeGame(['Ваня', 'Оля', 'Денис', 'Дворик'], 'Ваня');
+  game.home = [cloneCard(byName['Комната 402'])];
+  game.threat = [cloneCard(byName['Шум']), cloneCard(byName['Обход'])];
+  game.energy = 2;
+  game = takeTurn(game, 'buy');
+  const s = getState(game);
+  assert.equal(s.home.find((c) => c.name === 'Комната 402'), undefined, 'старая Комната 402 сброшена (replace)');
+  assert.ok(s.discard.some((c) => c.name === 'Комната 402'), 'Комната 402 в сбросе');
+  assert.ok(s.home.some((c) => c.name === 'Дворик'), 'Дворик в Доме');
+  assert.equal(s.threat.find((c) => c.name === 'Шум'), undefined, 'Шум сброшен (discardTarget)');
+  assert.ok(s.threat.some((c) => c.name === 'Обход'), 'Обход остаётся в зоне');
+  assert.equal(s.home.filter((c) => c.tags && c.tags.includes('place')).length, 1, 'ровно 1 место в Доме');
+});
+
+test('P3: валидация — place без discardTarget(filter.name) бросает', () => {
+  assert.throws(
+    () => validateCards([{ name: 'X', tags: ['place'], effects: [{ when: 'enter', op: 'shuffleThreats' }] }]),
+    /discardTarget/
   );
-  game = takeTurn(game, 'discard');
-  game = takeTurn(game, 'buy');
-  game = takeTurn(game, 'discard');
-  game = takeTurn(game, 'buy');
-  assert.equal(getScore(game), 3);
+});
+
+test('P4: валидация — place без shuffleThreats бросает', () => {
+  assert.throws(
+    () => validateCards([{ name: 'X', tags: ['place'], effects: [{ when: 'enter', op: 'discardTarget', filter: { name: 'Шум' } }] }]),
+    /shuffleThreats/
+  );
 });
 
 // ---- L. Грязь (динамическая стоимость покупки) ---------------------------
@@ -283,6 +337,113 @@ test('L1: Грязь (arrow up) уходит в Зону Угрозы и пов�
   assert.equal(s.energy, 2, 'Грязь не тратит энергию при входе');
   // энергии 2 < 3 -> покупка недоступна
   assert.throws(() => takeTurn(game, 'buy'), /energy/i);
+});
+
+// ---- M. Денис (перехват угрозы/авто под себя) ----------------------------
+
+test('M1: Денис перехватывает следующую угрозу под себя, эффект Шума не считается', () => {
+  let game = makeGame(['Ваня', 'Оля', 'Денис', 'Шум', 'Шум', 'Шум'], 'Денис');
+  game = runToEnd(game, 'discard');
+  const s = getState(game);
+  const denis = s.home.find((c) => c.name === 'Денис');
+  assert.ok(denis.attached && denis.attached.some((a) => a.name === 'Шум'), 'Шум должен быть под Денисом');
+  assert.equal(s.threat.filter((c) => c.name === 'Шум').length, 2, 'только 2 Шума в Зоне Угрозы');
+  assert.equal(deriveThreatCount(game), 2, 'перехваченный Шум не считается угрозой');
+});
+
+test('M2: перехваченная Грязь не повышает цену покупки', () => {
+  let game = makeGame(['Ваня', 'Оля', 'Денис', 'Грязь'], 'Денис');
+  game = takeTurn(game, 'buy'); // Грязь -> под Дениса, эффект пропущен
+  assert.equal(deriveBuyCost(game), 2, 'addBuyCost перехваченной Грязи не действует');
+  const s = getState(game);
+  assert.ok(s.home.find((c) => c.name === 'Денис').attached.some((a) => a.name === 'Грязь'));
+});
+
+test('M3: после первой перехваченной карты Денис больше не ловит', () => {
+  let game = makeGame(['Ваня', 'Оля', 'Денис', 'Шум', 'Шум'], 'Денис');
+  game = takeTurn(game, 'discard'); // 1-й Шум -> под Дениса
+  game = takeTurn(game, 'discard'); // 2-й Шум -> в Зону Угрозы (Денис уже не пуст)
+  const s = getState(game);
+  assert.equal(s.threat.filter((c) => c.name === 'Шум').length, 1, 'второй Шум в зоне угроз');
+});
+
+test('M4: Денис перехватывает авто-карту (Паша: бухой), replace не срабатывает', () => {
+  const g = createGame({ deck: [cloneCard(byName['Паша: бухой'])] });
+  g.home = [cloneCard(byName['Паша']), cloneCard(byName['Денис'])];
+  g.energy = 2;
+  const after = takeTurn(g, 'buy'); // Паша: бухой -> под Дениса, replace пропущен
+  const s = getState(after);
+  assert.ok(s.home.find((c) => c.name === 'Паша'), 'Паша остался (не заменён)');
+  const denis = s.home.find((c) => c.name === 'Денис');
+  assert.ok(denis.attached && denis.attached.some((a) => a.name === 'Паша: бухой'));
+});
+
+test('M5: Денис не перехватывает нейтральную карту (покупку/сброс)', () => {
+  let game = makeGame(['Ваня', 'Оля', 'Денис', 'Комната 402'], 'Денис');
+  game = takeTurn(game, 'discard'); // Комната 402 — нейтральная, не перехватывается
+  const s = getState(game);
+  assert.ok(s.discard.some((c) => c.name === 'Комната 402'), 'нейтральная карта в сбросе, не под Денисом');
+  assert.ok(!s.home.find((c) => c.name === 'Денис').attached, 'под Денисом пусто');
+});
+
+// ---- N. Оля (ловит любую следующую карту под себя, эффект не срабатывает) --
+
+test('N1: Оля ловит следующую угрозу под себя, эффект не считается', () => {
+  let game = makeGame(['Ваня', 'Оля', 'Денис', 'Шум', 'Шум', 'Шум'], 'Оля');
+  game = runToEnd(game, 'discard');
+  const s = getState(game);
+  const olya = s.home.find((c) => c.name === 'Оля');
+  assert.ok(olya.attached && olya.attached.some((a) => a.name === 'Шум'), 'Шум должен быть под Олей');
+  assert.equal(s.threat.filter((c) => c.name === 'Шум').length, 2, 'только 2 Шума в Зоне Угрозы');
+  assert.equal(deriveThreatCount(game), 2, 'перехваченный Шум не считается угрозой');
+});
+
+test('N2: Оля даёт +1 ПО за каждого мужчину под ней', () => {
+  const g = createGame({ deck: [cloneCard(byName['Ваня'])] });
+  g.home = [cloneCard(byName['Оля'])];
+  g.energy = 2;
+  const after = takeTurn(g, 'discard');
+  const s = getState(after);
+  const olya = s.home.find((c) => c.name === 'Оля');
+  assert.ok(olya.attached && olya.attached.some((a) => a.name === 'Ваня'), 'Ваня под Олей');
+  assert.equal(getScore(after), 1, 'Оля +1 ПО за пойманного мужчину (Ваня)');
+});
+
+test('N3: Оля ловит только одну карту, пока под ней пусто', () => {
+  const g = createGame({ deck: [cloneCard(byName['Ваня']), cloneCard(byName['Паша'])] });
+  g.home = [cloneCard(byName['Оля'])];
+  g.energy = 2;
+  let game = takeTurn(g, 'discard'); // Ваня -> под Олю
+  game = takeTurn(game, 'buy');      // Паша -> Дом (слот Оли занят)
+  const s = getState(game);
+  const olya = s.home.find((c) => c.name === 'Оля');
+  assert.equal(olya.attached.length, 1, 'под Олей ровно одна карта');
+  assert.ok(s.home.some((c) => c.name === 'Паша'), 'Паша ушёл в Дом, а не под Олю');
+});
+
+test('N4: при конфликте Денис+Оля игрок выбирает владельца (Оля)', () => {
+  const g = createGame({ deck: [cloneCard(byName['Паша: бухой'])] });
+  g.home = [cloneCard(byName['Паша']), cloneCard(byName['Денис']), cloneCard(byName['Оля'])];
+  g.energy = 2;
+  g.choose = (opts) => opts.find((c) => c.name === 'Оля') || opts[0];
+  const after = takeTurn(g, 'buy');
+  const s = getState(after);
+  const olya = s.home.find((c) => c.name === 'Оля');
+  const denis = s.home.find((c) => c.name === 'Денис');
+  assert.ok(olya.attached && olya.attached.some((a) => a.name === 'Паша: бухой'), 'Паша: бухой под Олей');
+  assert.ok(!denis.attached || denis.attached.length === 0, 'под Денисом пусто');
+  assert.ok(s.home.find((c) => c.name === 'Паша'), 'Паша остался (replace Дениса не сработал)');
+});
+
+test('N5: не-мужчина под Олей не даёт бонуса ПО', () => {
+  const g = createGame({ deck: [cloneCard(byName['Комната 402'])] });
+  g.home = [cloneCard(byName['Оля'])];
+  g.energy = 2;
+  const after = takeTurn(g, 'discard'); // Комната 402 -> под Олю (любая)
+  const s = getState(after);
+  const olya = s.home.find((c) => c.name === 'Оля');
+  assert.ok(olya.attached && olya.attached.some((a) => a.name === 'Комната 402'), 'Комната 402 под Олей');
+  assert.equal(getScore(after), 0, 'не-мужчина не даёт бонуса, Оля без ПО');
 });
 
 test('L1b: при 3+ энергии покупка под Грязь тратит ровно 3', () => {
@@ -403,6 +564,9 @@ function assertInvariants(game) {
   if (s.status === 'lost') assert.equal(score, 0, 'lost but score != 0');
 
   checkAttachInvariant(game);
+
+  const placeCount = s.home.filter((c) => c.tags && c.tags.includes('place')).length;
+  assert.ok(placeCount <= 1, `more than one place in home: ${placeCount}`);
 
   return { realThreats: realThreats.length, total: countAllCards(s) };
 }

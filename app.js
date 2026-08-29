@@ -9,7 +9,7 @@
 const {
   createGame, setup, getScore, getState, activate,
   runTurnStart, getTopCard, resolveTop, deriveThreatBreakdown, deriveScoreBreakdown,
-  deriveThreatCount, isThreat, matches, conditionMet, deriveAsleepSet, isPerson, isBuyFree, deriveBuyCost,
+  deriveThreatCount, isThreat, matches, conditionMet, deriveAsleepSet, isPerson, isBuyFree, deriveBuyCost, findInterceptor,
   createTurnController, buildDeck, enableGesture, disableGesture,
 } = globalThis.Convivium;
 
@@ -27,7 +27,7 @@ const FACE_MAP = {
   '3-й сосед': 'faces/face_vova.png',
 };
 const ICON_MAP = {
-  'Обход': '🚪', 'Комната 402': '🚪', 'Порванная струна': '🎸', 'Шум': '📢',
+  'Обход': '🚪', 'Комната 402': '🚪', 'Дворик': '🏡', 'Порванная струна': '🎸', 'Шум': '📢',
   'Звёздный час': '🌟', 'Плов': '🍚', 'Кровать': '🛏️', 'Конфликт': '💢',
   'День рождения!': '🎂', 'Палёный алкоголь': '🥃', 'Тост': '🥂',
   'Большая вечеринка': '🎉', 'Старшекур': '🧓', 'Массовый перекур': '🚬', 'Грязь': '🤢',
@@ -51,10 +51,9 @@ function effectIcons(card) {
   const out = [];
   if (card.cost === '🔄') out.push('🔄');
   if (card.attach) out.push('📎');
+  if ((card.effects || []).some((e) => e.op === 'intercept')) out.push('🫳');
   if (card.sleep) out.push('😴');
   if ((card.effects || []).some((e) => e.op === 'accumulate' || e.when === 'turnStart')) out.push('⚡');
-  if (card.arrow === 'down') out.push('⬇');
-  else if (card.arrow === 'up') out.push('⬆');
   return out;
 }
 
@@ -94,6 +93,7 @@ function pushLog(msg) {
 function renderCardEl(card, { compact = false, detail = false } = {}) {
   const el = document.createElement('div');
   el.className = 'card' + (compact ? ' compact' : '') + (detail ? ' detail' : '');
+  el.dataset.name = card.name;
   if (card.asleep) el.classList.add('asleep');
   if (card.arrow === 'up') el.classList.add('neg', 'threat');
   else if (card.arrow === 'down') el.classList.add('neg', 'auto');
@@ -160,7 +160,13 @@ function renderCardEl(card, { compact = false, detail = false } = {}) {
   if (!compact && card.description) {
     const d = document.createElement('div');
     d.className = 'card-desc';
-    d.textContent = card.description;
+    if ((card.effects || []).some((e) => e.op === 'intercept')) {
+      const badge = document.createElement('span');
+      badge.className = 'intercept-badge';
+      badge.textContent = '🫳';
+      d.appendChild(badge);
+    }
+    d.appendChild(document.createTextNode(card.description));
     body.appendChild(d);
   }
   el.appendChild(body);
@@ -426,12 +432,21 @@ function flyDirection(card, action) {
 async function submitDecision(action) {
   if (busy) return;
   busy = true;
-  const dir = flyDirection(tc.state.topCard, action);
+  const card = tc.state.topCard;
+  const interceptor = findInterceptor(tc.state.game, card);
+  const dir = interceptor ? 'intercept' : flyDirection(card, action);
   $('center-card').classList.add('fly-' + dir);
   await wait(420);
   const progressed = await tc.decide(action);
   busy = false;
-  if (!progressed) enableDecisionUI(tc.state.topCard);  // отмена выбора аттача
+  if (interceptor) {
+    const ownerEl = $('home-cards').querySelector('[data-name="' + interceptor.name + '"]');
+    if (ownerEl) {
+      ownerEl.classList.add('intercept-owner');
+      setTimeout(() => ownerEl.classList.remove('intercept-owner'), 900);
+    }
+  }
+  if (!progressed) enableDecisionUI(tc.state.topCard);
 }
 
 // ---------------------------------------------------------------------------
@@ -524,6 +539,12 @@ async function promptChoiceAdapter(payload) {
     if (n < 1) return [];
     const working = tc.state.game.deck.slice(0, n);
     return ChoiceOverlay({ title: 'Расставь карты: выбери верхнюю', items: working, mode: 'reorder', variant: 'detail' });
+  }
+  if (payload.kind === 'interceptors') {
+    const items = payload.items || [];
+    return items.length
+      ? ChoiceOverlay({ title: 'Кто ловит карту?', items })
+      : null;
   }
   return null;
 }

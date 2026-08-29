@@ -4,8 +4,8 @@
 // который общается с контроллером через инъектированные колбэки render/log/promptChoice.
 (function () {
   const {
-    createGame, setup, runTurnStart, getTopCard, resolveTop, activate,
-    deriveAsleepSet, isBuyFree, deriveBuyCost, matches, deriveThreatCount,
+    createGame, setup, runTurnStart, getTopCard, resolveTop, activate: engineActivate,
+    deriveAsleepSet, isBuyFree, deriveBuyCost, matches, deriveThreatCount, findInterceptors,
   } = globalThis.Convivium;
 
   function createTurnController({ render, log, promptChoice }) {
@@ -97,6 +97,12 @@
           state.game.choose = () => chosen;
         }
       }
+      const interceptors = findInterceptors(state.game, state.topCard);
+      if (interceptors.length > 1) {
+        const chosen = await promptChoice({ kind: 'interceptors', items: interceptors });
+        if (chosen === null) return;
+        state.game.choose = () => chosen;
+      }
       state.game = resolveTop(state.game, action);
       state.game.choose = (opts) => opts[0];
       logResolve(state.topCard, action);
@@ -128,7 +134,7 @@
         state.game.reorder = (top) => ordered;
       }
       const before = state.game;
-      state.game = activate(state.game, name);
+      state.game = engineActivate(state.game, name);
       if (state.game === before) return;
       state.game.choose = (opts) => opts[0];
       state.game.reorder = (top) => top;

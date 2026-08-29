@@ -19,8 +19,23 @@ const cards = [
   },
   {
     name: 'Комната 402',
-    description: '',
+    description: 'Покупка: сбрось Порванную струну; прочие Угрозы (кроме Обхода) замешиваются в колоду взакрытую.',
     tags: ['place'],
+    effects: [
+      { when: 'enter', op: 'discardTarget', filter: { name: 'Порванная струна' } },
+      { when: 'enter', op: 'replace', match: { tags: ['place'] }, in: 'home' },
+      { when: 'enter', op: 'shuffleThreats' },
+    ],
+  },
+  {
+    name: 'Дворик',
+    description: 'Покупка: сбрось Шум; прочие Угрозы (кроме Обхода) замешиваются в колоду взакрытую.',
+    tags: ['place'],
+    effects: [
+      { when: 'enter', op: 'discardTarget', filter: { name: 'Шум' } },
+      { when: 'enter', op: 'replace', match: { tags: ['place'] }, in: 'home' },
+      { when: 'enter', op: 'shuffleThreats' },
+    ],
   },
   {
     name: 'Ваня',
@@ -129,10 +144,17 @@ const cards = [
   {
     name: 'Оля',
     tags: ['woman'],
+    description: '❗️ Ловит следующую карту и кладёт её под себя открыто — её эффект не срабатывает. Если под ней пусто, ловит любую. +1 ПО за каждого мужчину под ней.',
+    effects: [
+      { op: 'intercept', match: {} },
+      { op: 'scorePerAttached', match: { tags: ['man'] }, amount: 1 },
+    ],
   },
   {
     name: 'Денис',
     tags: ['man'],
+    description: 'Если под ним пусто — следующая открытая угроза или авто-карта уходит под него, её эффект пропускается.',
+    effects: [{ op: 'intercept' }],
   },
   {
     name: '3-й сосед',

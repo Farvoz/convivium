@@ -27,7 +27,7 @@ const OP_REGISTRY = {
     },
     run(game, source, e) {
       const zone = e.in === 'threat' ? game.threat : game.home;
-      const idx = zone.findIndex((c) => matches(game, c, e.match));
+      const idx = zone.findIndex((c) => c !== source && matches(game, c, e.match));
       if (idx >= 0) {
         const [target] = zone.splice(idx, 1);
         detachAttachments(game, target);
@@ -65,7 +65,7 @@ const OP_REGISTRY = {
     },
   },
   discardTarget: {
-    kind: 'action', when: undefined, phaseable: true,
+    kind: 'action', when: 'enter', phaseable: true,
     validate(e, where) { validateMatch(e.filter, where + '.discardTarget'); },
     run(game, source, e) {
       const pool = game.threat.filter((c) => matches(game, c, e.filter || {}, 'threat'));
@@ -74,6 +74,18 @@ const OP_REGISTRY = {
         detachAttachments(game, chosen);
         removeFromZone(game.threat, chosen);
         game.discard.push(chosen);
+      }
+    },
+  },
+  shuffleThreats: {
+    kind: 'action', when: 'enter', phaseable: true,
+    validate() {},
+    run(game) {
+      for (const c of game.threat.filter((c) => isThreat(c))) {
+        removeFromZone(game.threat, c);
+        c.faceDown = true;
+        const idx = Math.floor(game.rng() * (game.deck.length + 1));
+        game.deck.splice(idx, 0, c);
       }
     },
   },
@@ -121,6 +133,17 @@ const OP_REGISTRY = {
   buyFreeIf: {
     kind: 'cond', phaseable: false,
     validate(e, where) { validateMatch(e.match, where + '.buyFreeIf'); },
+  },
+  intercept: {
+    kind: 'action', when: undefined, phaseable: false,
+    validate(e, where) { if (e.match !== undefined) validateMatch(e.match, where + '.intercept'); },
+  },
+  scorePerAttached: {
+    kind: 'derive', phaseable: false,
+    validate(e, where) {
+      if (typeof e.amount !== 'number') throw new Error(`${where}: scorePerAttached.amount number`);
+      validateMatch(e.match, where + '.scorePerAttached');
+    },
   },
 };
 
@@ -198,6 +221,15 @@ function validateCard(c, idx) {
     if (typeof c.loseIf !== 'object') throw new Error(`${where}: loseIf object`);
     if (typeof c.loseIf.threatsCount !== 'number') throw new Error(`${where}: loseIf.threatsCount number`);
   }
+  if (c.tags && c.tags.includes('place')) {
+    const dt = (c.effects || []).find((e) => e.op === 'discardTarget');
+    if (!dt || !dt.filter || typeof dt.filter.name !== 'string' || !dt.filter.name) {
+      throw new Error(`${where}: place card needs discardTarget with filter.name`);
+    }
+    if (!(c.effects || []).some((e) => e.op === 'shuffleThreats')) {
+      throw new Error(`${where}: place card needs shuffleThreats effect`);
+    }
+  }
   if (c.effects !== undefined) {
     if (!Array.isArray(c.effects)) throw new Error(`${where}: effects array`);
     c.effects.forEach((e, i) => validateEffect(e, `${where}.effects[${i}]`, false));
@@ -227,6 +259,33 @@ function isThreat(c) {
 }
 function isPerson(c) {
   return !!(c.tags && (c.tags.includes('man') || c.tags.includes('woman')));
+}
+// Возвращает список карт-перехватчиков (владельцев) для входящей карты.
+// По умолчанию (без match) перехватывает только настоящие угрозы (isThreat)
+// и авто-карты (arrow down); с match — любые карты, проходящие matches().
+// Срабатывает, только если у владельца ещё пусто «под ним» (нет attached).
+function findInterceptors(game, card) {
+  const eligible = [];
+  for (const owner of inPlayCards(game)) {
+    if (owner.attached && owner.attached.length) continue;
+    const eff = (owner.effects || []).find((e) => e.op === 'intercept');
+    if (!eff) continue;
+    const isTarget = eff.match
+      ? matches(game, card, eff.match)
+      : (isThreat(card) || card.arrow === 'down');
+    if (isTarget) eligible.push(owner);
+  }
+  return eligible;
+}
+
+// Возвращает карту-перехватчик (владельца) для входящей карты, либо null.
+// При нескольких подходящих владельцах выбор делает игрок через game.choose.
+function findInterceptor(game, card) {
+  const eligible = findInterceptors(game, card);
+  if (eligible.length === 0) return null;
+  if (eligible.length === 1) return eligible[0];
+  const chosen = game.choose ? game.choose(eligible) : eligible[0];
+  return eligible.find((o) => o.name === (chosen && chosen.name)) || eligible[0];
 }
 function inPlayCards(game) {
   return [...game.home, ...game.threat];
@@ -310,6 +369,7 @@ function setup(game, { choose } = {}) {
   g.status = deriveStatus(g);
   g.turnPhase = 'idle';
   checkAttachInvariant(g);
+  checkPlaceInvariant(g);
   return g;
 }
 
@@ -352,11 +412,20 @@ function resolveTop(game, action) {
   g.status = deriveStatus(g);
   g.turnPhase = 'idle';
   checkAttachInvariant(g);
+  checkPlaceInvariant(g);
   return g;
 }
 
 function placeCard(g, card, action) {
   const c = cloneCard(card);
+  const trap = findInterceptor(g, c);
+  if (trap) {
+    // перехват: карта уходит под владельца, эффекты не применяются
+    trap.attached = trap.attached || [];
+    trap.attached.push(c);
+    c.attachedTo = trap.name;
+    return;
+  }
   if (c.arrow === 'up') {
     g.threat.push(c);
     runEnterActions(g, c);
@@ -451,6 +520,7 @@ function activate(game, name) {
   g.discard.push(live);
   g.status = deriveStatus(g);
   checkAttachInvariant(g);
+  checkPlaceInvariant(g);
   return g;
 }
 
@@ -485,12 +555,15 @@ function deriveSnapshot(game) {
       if (e.op === 'modifyVp') for (const t of inPlay) if (matches(game, t, e.match)) vp.set(t, e.value);
     }
   }
-  // attach — ПОСЛЕ modifyVp (Хит не теряется при Порванной струне)
+  // attach — ПОСЛЕ modifyVp (Хит не теряется при Порванной струне).
+  // Только карты с полем attach (Звёздный час и т.п.) дают владельцу ПО;
+  // перехваченные угрозы (attach без поля attach) ничего не дают.
   for (const c of inPlay) {
     if (c.attached) {
       for (const a of c.attached) {
+        if (!a.attach) continue;
         vp.set(c, (vp.get(c) || 0) + (a.vp || 0));
-        if (a.attach && a.attach.bonusVp && c.tags && c.tags.includes(a.attach.bonusIfTag)) {
+        if (a.attach.bonusVp && c.tags && c.tags.includes(a.attach.bonusIfTag)) {
           vp.set(c, vp.get(c) + a.attach.bonusVp);
         }
       }
@@ -534,10 +607,14 @@ function deriveSnapshot(game) {
   let bonus = 0;
   for (const c of inPlay) {
     for (const e of c.effects || []) {
-      if (e.op !== 'scorePerPerson') continue;
-      if (e.if && !conditionMet(game, e.if)) continue;
-      const persons = inPlay.filter((p) => isPerson(p) && !asleep.has(p)).length;
-      bonus += e.amount * persons;
+      if (e.op === 'scorePerPerson') {
+        if (e.if && !conditionMet(game, e.if)) continue;
+        const persons = inPlay.filter((p) => isPerson(p) && !asleep.has(p)).length;
+        bonus += e.amount * persons;
+      } else if (e.op === 'scorePerAttached') {
+        const attached = (c.attached || []).filter((a) => matches(game, a, e.match));
+        bonus += e.amount * attached.length;
+      }
     }
   }
   total += bonus;
@@ -655,6 +732,12 @@ function checkAttachInvariant(game) {
   }
 }
 
+// Инвариант: в Доме одновременно не более одной карты-места (тег place).
+function checkPlaceInvariant(game) {
+  const n = game.home.filter((c) => c.tags && c.tags.includes('place')).length;
+  if (n > 1) throw new Error(`more than one place in home: ${n}`);
+}
+
 function shuffle(arr, rng) {
   for (let i = arr.length - 1; i > 0; i--) {
     const j = Math.floor(rng() * (i + 1));
@@ -689,5 +772,5 @@ function buildDeck(opts = {}, rng = Math.random) {
 globalThis.Convivium = {
   createGame, setup, takeTurn, runTurnStart, getTopCard, resolveTop, activate, getState, getScore,
   deriveThreatCount, deriveThreatBreakdown, deriveScoreBreakdown, deriveStatus, deriveBuyCost, isThreat, validateCards, checkAttachInvariant,
-  matches, conditionMet, deriveAsleepSet, isPerson, isBuyFree, cloneCard, buildDeck,
+  matches, conditionMet, deriveAsleepSet, isPerson, isBuyFree, cloneCard, buildDeck, findInterceptor, findInterceptors,
 };

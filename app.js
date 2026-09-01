@@ -320,7 +320,7 @@ function renderCardBack() {
 
 function renderCenterBack() {
   const wrap = $('center-card');
-  wrap.className = 'pop-in tappable';
+  wrap.className = 'tappable';
   wrap.innerHTML = '';
   wrap.appendChild(renderCardBack());
 }

@@ -721,8 +721,7 @@ function deriveSnapshot(game) {
   const score = game.status === 'lost' ? 0 : total;
   const scoreRows = [];
   for (const c of inPlay) {
-    const v = vp.get(c) || 0;
-    if (v !== 0) scoreRows.push({ card: c, value: v });
+    scoreRows.push({ card: c, value: vp.get(c) || 0 });
   }
   if (bonus !== 0) scoreRows.push({ label: 'Бонус за гостей', value: bonus });
 

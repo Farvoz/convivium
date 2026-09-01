@@ -503,8 +503,6 @@ body.phase-activate .card.activatable {
 }
 
 /* ---- animations ---- */
-@keyframes popIn { from { transform: scale(0.8); opacity: 0; } to { transform: scale(1); opacity: 1; } }
-.pop-in { animation: popIn .28s ease; }
 @keyframes slideIn { from { transform: translateY(-8px); opacity: 0; } to { transform: none; opacity: 1; } }
 @keyframes slideInBottom { from { transform: translateY(8px); opacity: 0; } to { transform: none; opacity: 1; } }
 

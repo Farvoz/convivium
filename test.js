@@ -296,7 +296,16 @@ test('D5d: Звёздный час можно выбрать не самого �
   const olya = s.home.find((c) => c.name === 'Оля');
   assert.ok(!(vanya.attached || []).some((c) => c.name === 'Звёздный час'), 'Звёздный час не должен быть у левого Вани');
   assert.ok(olya.attached && olya.attached.some((c) => c.name === 'Звёздный час'), 'Звёздный час должен быть у выбранной Оли');
-  assert.equal(getScore(after), 2); // Ваня(1) + Оля(1) + Звёздный час база под Олей(1)
+   assert.equal(getScore(after), 2); // Ваня(1) + Оля(1) + Звёздный час база под Олей(1)
+});
+
+test('D5e: Шура (гитарист) + Звёздный час = 3 ПО', () => {
+  let game = makeGame(['Шура', 'Оля', 'Денис', 'Звёздный час'], 'Шура');
+  game = takeTurn(game, 'buy');
+  const s = getState(game);
+  const shura = s.home.find((c) => c.name === 'Шура');
+  assert.ok(shura.attached && shura.attached.some((c) => c.name === 'Звёздный час'));
+  assert.equal(getScore(game), 3); // Шура(1) + Звёздный час(1) + бонус гитариста(1)
 });
 
 test('D6: Порванная струна обнуляет ПО гитаристов', () => {
@@ -811,8 +820,19 @@ test('E3: при замене владельца прикреплённая ат
   assert.equal(s2.home.find((c) => c.name === 'Шура'), undefined, 'Шура заменён');
   assert.ok(s2.home.find((c) => c.name === 'Шура: бухой'), 'Шура: бухой в Доме');
   assert.equal(s2.home.some((c) => c.name === 'Звёздный час'), false, 'Звёздный час не должен висеть в Доме');
-  assert.ok(s2.discard.some((c) => c.name === 'Звёздный час'), 'Звёздный час должен уйти в сброс');
+   assert.ok(s2.discard.some((c) => c.name === 'Звёздный час'), 'Звёздный час должен уйти в сброс');
   assertInvariants(game);
+});
+
+test('E3b: Шура заменён → итог = 0 (гитарист потерян, Звёздный час в сбросе)', () => {
+  let game = makeGame(
+    ['Шура', 'Оля', 'Денис', 'Звёздный час', 'Шура: бухой'],
+    'Шура'
+  );
+  game = takeTurn(game, 'buy'); // Звёздный час → Шура
+  assert.equal(getScore(game), 3); // Шура(1) + ЗВ(1) + бонус(1)
+  game = takeTurn(game, 'buy'); // Шура: бухой заменяет Шуру
+  assert.equal(getScore(game), 0); // Шура: бухой(0) + Оля(0) + Денис(0)
 });
 
 // ---- F. Property-based / fuzz --------------------------------------------
@@ -1051,6 +1071,25 @@ const GOLDEN = [
       return g;
     },
     expect: (g) => { assert.equal(getScore(g), 3); },
+  },
+  {
+    id: 'scoreRows: Большая вечеринка — одна строка, не две',
+    card: 'Большая вечеринка',
+    order: ['Ваня', 'Оля', 'Денис', 'Большая вечеринка', 'Комната 402', 'Плов', '3-й сосед'],
+    choose: 'Ваня',
+    run: (g) => {
+      while (g.status === 'playing') {
+        const a = getState(g).energy >= 2 ? 'buy' : 'discard';
+        g = takeTurn(g, a);
+      }
+      return g;
+    },
+    expect: (g) => {
+      const rows = deriveScoreBreakdown(g);
+      const partyRows = rows.filter((r) => r.card && r.card.name === 'Большая вечеринка');
+      assert.equal(partyRows.length, 1, 'Большая вечеринка должна появиться ровно 1 раз в scoreRows');
+      assert.ok(partyRows[0].value > 0, 'Бонус за гостей должен быть > 0');
+    },
   },
   {
     id: 'attach', card: 'Звёздный час',

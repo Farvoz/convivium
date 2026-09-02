@@ -733,31 +733,36 @@ function deriveSnapshot(game) {
   }
 
   // итоговый счёт + вклады (один проход scorePerPerson/scorePerAttached)
-  let total = 0;
-  for (const c of inPlay) total += vp.get(c) || 0;
-  const bonusByCard = new Map();
   for (const c of inPlay) {
     for (const e of c.effects || []) {
       if (e.op === 'scorePerPerson') {
         if (e.if && !conditionMet(game, e.if)) continue;
         const persons = inPlay.filter((p) => isPerson(p) && !asleep.has(p)).length;
-        bonusByCard.set(c, (bonusByCard.get(c) || 0) + e.amount * persons);
+        const add = e.amount * persons;
+        if (add) {
+          vp.set(c, (vp.get(c) || 0) + add);
+          const row = bd.get(c) || [];
+          row.push({ label: c.name, value: add });
+          bd.set(c, row);
+        }
       } else if (e.op === 'scorePerAttached') {
         const attached = (c.attached || []).filter((a) => matches(game, a, e.match));
-        bonusByCard.set(c, (bonusByCard.get(c) || 0) + e.amount * attached.length);
+        const add = e.amount * attached.length;
+        if (add) {
+          vp.set(c, (vp.get(c) || 0) + add);
+          const row = bd.get(c) || [];
+          row.push({ label: c.name, value: add });
+          bd.set(c, row);
+        }
       }
     }
   }
-  let bonus = 0;
-  for (const v of bonusByCard.values()) bonus += v;
-  total += bonus;
+  let total = 0;
+  for (const c of inPlay) total += vp.get(c) || 0;
   const score = game.status === 'lost' ? 0 : total;
   const scoreRows = [];
   for (const c of inPlay) {
     scoreRows.push({ card: c, value: vp.get(c) || 0 });
-  }
-  for (const [card, amount] of bonusByCard) {
-    scoreRows.push({ card, value: amount });
   }
 
   return { inPlay, asleep, vpMap: vp, vpBreakdown: bd, threatRows, score, scoreRows };

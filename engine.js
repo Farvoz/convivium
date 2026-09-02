@@ -648,11 +648,20 @@ function deriveSnapshot(game) {
   const inPlay = inPlayCards(game);
   const asleep = deriveAsleepSet(game);
   const vp = new Map();
-  for (const c of inPlay) vp.set(c, c.vp || 0);
+  const bd = new Map();
+  for (const c of inPlay) {
+    vp.set(c, c.vp || 0);
+    if (c.vp) bd.set(c, [{ label: 'База', value: c.vp }]);
+  }
   // modifyVp — абсолютный оверрайд базы
   for (const c of inPlay) {
     for (const e of c.effects || []) {
-      if (e.op === 'modifyVp') for (const t of inPlay) if (matches(game, t, e.match)) vp.set(t, e.value);
+      if (e.op === 'modifyVp') for (const t of inPlay) {
+        if (matches(game, t, e.match)) {
+          vp.set(t, e.value);
+          bd.set(t, [{ label: 'База', value: e.value }]);
+        }
+      }
     }
   }
   // attach — ПОСЛЕ modifyVp (Хит не теряется при Порванной струне).
@@ -662,9 +671,18 @@ function deriveSnapshot(game) {
     if (c.attached) {
       for (const a of c.attached) {
         if (!a.attach) continue;
-        vp.set(c, (vp.get(c) || 0) + (a.vp || 0));
+        const add = a.vp || 0;
+        if (add) {
+          vp.set(c, (vp.get(c) || 0) + add);
+          const row = bd.get(c) || [];
+          row.push({ label: a.name, value: add });
+          bd.set(c, row);
+        }
         if (a.attach.bonusVp && c.tags && c.tags.includes(a.attach.bonusIfTag)) {
           vp.set(c, vp.get(c) + a.attach.bonusVp);
+          const row = bd.get(c) || [];
+          row.push({ label: a.name, value: a.attach.bonusVp });
+          bd.set(c, row);
         }
       }
     }
@@ -674,7 +692,14 @@ function deriveSnapshot(game) {
     for (const e of c.effects || []) {
       if (e.op === 'addVp') {
         if (e.if && !conditionMet(game, e.if)) continue;
-        for (const t of inPlay) if (matches(game, t, e.match)) vp.set(t, (vp.get(t) || 0) + e.amount);
+        for (const t of inPlay) {
+          if (matches(game, t, e.match)) {
+            vp.set(t, (vp.get(t) || 0) + e.amount);
+            const row = bd.get(t) || [];
+            row.push({ label: c.name, value: e.amount });
+            bd.set(t, row);
+          }
+        }
       }
     }
   }
@@ -684,11 +709,17 @@ function deriveSnapshot(game) {
       if (e.op === 'bonusVp') {
         if (e.if && !conditionMet(game, e.if)) continue;
         vp.set(c, (vp.get(c) || 0) + e.amount);
+        const row = bd.get(c) || [];
+        row.push({ label: c.name, value: e.amount });
+        bd.set(c, row);
       }
     }
   }
   // сон обнуляет
-  for (const c of asleep) vp.set(c, 0);
+  for (const c of asleep) {
+    vp.set(c, 0);
+    bd.set(c, [{ label: 'Спит', value: 0 }]);
+  }
 
   // веса Угрозы — один цикл (было в deriveThreatCount / deriveThreatBreakdown)
   const threatRows = [];
@@ -701,31 +732,35 @@ function deriveSnapshot(game) {
     threatRows.push({ card: c, weight: w });
   }
 
-  // итоговый счёт + вклады (один проход scorePerPerson)
+  // итоговый счёт + вклады (один проход scorePerPerson/scorePerAttached)
   let total = 0;
   for (const c of inPlay) total += vp.get(c) || 0;
-  let bonus = 0;
+  const bonusByCard = new Map();
   for (const c of inPlay) {
     for (const e of c.effects || []) {
       if (e.op === 'scorePerPerson') {
         if (e.if && !conditionMet(game, e.if)) continue;
         const persons = inPlay.filter((p) => isPerson(p) && !asleep.has(p)).length;
-        bonus += e.amount * persons;
+        bonusByCard.set(c, (bonusByCard.get(c) || 0) + e.amount * persons);
       } else if (e.op === 'scorePerAttached') {
         const attached = (c.attached || []).filter((a) => matches(game, a, e.match));
-        bonus += e.amount * attached.length;
+        bonusByCard.set(c, (bonusByCard.get(c) || 0) + e.amount * attached.length);
       }
     }
   }
+  let bonus = 0;
+  for (const v of bonusByCard.values()) bonus += v;
   total += bonus;
   const score = game.status === 'lost' ? 0 : total;
   const scoreRows = [];
   for (const c of inPlay) {
     scoreRows.push({ card: c, value: vp.get(c) || 0 });
   }
-  if (bonus !== 0) scoreRows.push({ label: 'Бонус за гостей', value: bonus });
+  for (const [card, amount] of bonusByCard) {
+    scoreRows.push({ card, value: amount });
+  }
 
-  return { inPlay, asleep, vpMap: vp, threatRows, score, scoreRows };
+  return { inPlay, asleep, vpMap: vp, vpBreakdown: bd, threatRows, score, scoreRows };
 }
 
 function deriveThreatCount(game) {
@@ -773,6 +808,7 @@ function getState(game) {
     const e = { ...c };
     e.vpEffective = snap.vpMap.get(c) || 0;
     e.asleep = snap.asleep.has(c);
+    e.vpBreakdown = snap.vpBreakdown.get(c) || [];
     return e;
   };
   return {
@@ -844,26 +880,49 @@ function shuffle(arr, rng) {
   }
 }
 
-// Сборка колоды (композиция сложности) — правило, а не UI.
-// all карты клонируются; prep карт открываются для подготовки;
-// «Обход» + N случайных вредных (угроза/авто) инъектируются обратно в колоду.
+// Сборка колоды (прогрессивный шафл) — правило, а не UI.
+// all карты клонируются; prep карты извлекаются ДО чанковинга;
+// остаток делится на N чанков (по 1 harmful/Обход в каждом), каждый тасуется отдельно, затем чанки собираются.
 function buildDeck(opts = {}, rng = Math.random) {
   const { prep = 3, harmful = 4, withObhod = true } = opts;
   const all = (globalThis.cards || []).map(cloneCard);
   const obhod = withObhod ? all.find((c) => c.name === 'Обход') : null;
   const harmfulCards = all.filter((c) => isThreat(c) || c.arrow === 'down');
-  const rest = all.filter((c) => c.name !== 'Обход' && !harmfulCards.includes(c));
-  shuffle(rest, rng);
-  const prepN = rest.splice(0, prep);
-  const extraArr = harmfulCards.slice();
-  shuffle(extraArr, rng);
-  const extra = extraArr.slice(0, harmful);
-  const injected = [obhod, ...extra].filter(Boolean);
-  for (const t of injected) {
-    const idx = Math.floor(rng() * (rest.length + 1));
-    rest.splice(idx, 0, t);
+  const neutral = all.filter((c) => c.name !== 'Обход' && !harmfulCards.includes(c));
+
+  const prepN = neutral.slice(0, prep);
+  const forChunks = neutral.slice(prep);
+
+  const harmfulPool = [...harmfulCards];
+  shuffle(harmfulPool, rng);
+  const harmfulSelected = harmfulPool.slice(0, harmful);
+  const pool = [...harmfulSelected, ...(withObhod && obhod ? [obhod] : [])];
+  const chunksN = pool.length;
+
+  if (chunksN === 0) return prepN;
+
+  const baseSize = Math.floor(forChunks.length / chunksN);
+  const remainder = forChunks.length % chunksN;
+  const chunkSizes = Array.from({ length: chunksN }, (_, i) =>
+    baseSize + (i < remainder ? 1 : 0),
+  );
+
+  const chunks = [];
+  let offset = 0;
+  for (let i = 0; i < chunksN; i++) {
+    chunks.push(forChunks.slice(offset, offset + chunkSizes[i]));
+    offset += chunkSizes[i];
   }
-  return [...prepN, ...rest];
+
+  for (let i = 0; i < chunksN; i++) {
+    const idx = Math.floor(rng() * (chunks[i].length + 1));
+    chunks[i].splice(idx, 0, pool[i]);
+  }
+
+  for (const chunk of chunks) shuffle(chunk, rng);
+  shuffle(chunks, rng);
+
+  return [...prepN, ...chunks.flat()];
 }
 
 // --- экспорт ---------------------------------------------------------------

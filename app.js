@@ -14,27 +14,6 @@ const {
 } = globalThis.Convivium;
 
 // ---------------------------------------------------------------------------
-// Данные отображения
-// ---------------------------------------------------------------------------
-const FACE_MAP = {
-  'Ваня': 'faces/face_vanya.jpg',
-  'Оля': 'faces/face_olya.jpg',
-  'Денис': 'faces/face_den.jpg',
-  'Шура': 'faces/face_shurik.jpg',
-  'Шура: бухой': 'faces/face_shurik.jpg',
-  'Паша': 'faces/face_pavel.jpg',
-  'Паша: бухой': 'faces/face_pavel.jpg',
-  '3-й сосед': 'faces/face_vova.jpg',
-};
-const ICON_MAP = {
-  'Обход': '🚪', 'Комната 402': '🚪', 'Дворик': '🏡', 'Порванная струна': '🎸', 'Шум': '📢',
-  'Звёздный час': '🌟', 'Плов': '🍚', 'Кровать': '🛏️', 'Конфликт': '💢',
-  'День рождения!': '🎂', 'Палёный алкоголь': '🥃', 'Тост': '🥂',
-  'Большая вечеринка': '🎉', 'Старшекур': '🧓', 'Массовый перекур': '🚬', 'Грязь': '🤢',
-};
-const TAG_ICON = { guitarist: '🎸', man: '👨', woman: '👩', place: '📍' };
-
-// ---------------------------------------------------------------------------
 // Утилиты
 // ---------------------------------------------------------------------------
 const $ = (id) => document.getElementById(id);
@@ -56,8 +35,77 @@ let logEntries = [];
 let deckTotal = null;
 let tc = null;
 let targetMode = null;
+let currentChoice = null;
 
 const clearAutoTimer = () => { if (autoTimer) { clearTimeout(autoTimer); autoTimer = null; } };
+
+function renderChoiceOverlay() {
+  if (!currentChoice) return;
+  const ov = $('choice-overlay');
+  const list = $('choice-cards');
+  const title = $('choice-title');
+
+  if (currentChoice.mode === 'reorder') {
+    if (currentChoice.working.length === 0) {
+      const { resolve, ordered } = currentChoice;
+      currentChoice = null;
+      ov.classList.add('hidden');
+      $('btn-choice-toggle').classList.add('hidden');
+      resolve(ordered);
+      return;
+    }
+    list.innerHTML = '';
+    title.textContent = currentChoice.title;
+    for (const c of currentChoice.working) {
+      const el = CardView(c, {
+        variant: currentChoice.variant,
+        interactive: 'click',
+        onClick: () => {
+          currentChoice.ordered.push(c);
+          currentChoice.working.splice(currentChoice.working.indexOf(c), 1);
+          renderChoiceOverlay();
+        }
+      });
+      list.appendChild(el);
+    }
+  } else {
+    list.innerHTML = '';
+    title.textContent = currentChoice.title;
+    for (const item of currentChoice.items) {
+      const el = CardView(item, {
+        variant: currentChoice.variant,
+        interactive: 'click',
+        onClick: () => {
+          const { resolve } = currentChoice;
+          currentChoice = null;
+          ov.classList.add('hidden');
+          $('btn-choice-toggle').classList.add('hidden');
+          resolve(item);
+        }
+      });
+      list.appendChild(el);
+    }
+  }
+}
+
+function showChoiceOverlay() {
+  if (!currentChoice) return;
+  renderChoiceOverlay();
+  $('choice-overlay').classList.remove('hidden');
+}
+
+function hideChoiceOverlay() {
+  $('choice-overlay').classList.add('hidden');
+}
+
+function toggleChoiceOverlay() {
+  const ov = $('choice-overlay');
+  if (ov.classList.contains('hidden')) {
+    showChoiceOverlay();
+  } else {
+    hideChoiceOverlay();
+  }
+}
 
 const setScreen = (name) => {
   for (const s of ['start', 'prep', 'game', 'end']) {
@@ -91,14 +139,14 @@ function renderCardEl(card, { compact = false, detail = false } = {}) {
 
   const img = document.createElement('div');
   img.className = 'card-img';
-  const face = FACE_MAP[card.name];
+  const face = card.face;
   if (face) {
     const im = document.createElement('img');
     im.src = face; im.alt = card.name;
     img.appendChild(im);
   } else {
     img.classList.add('placeholder');
-    img.textContent = ICON_MAP[card.name] || '🃏';
+    img.textContent = card.icon || '🃏';
   }
   el.appendChild(img);
 
@@ -128,7 +176,7 @@ function renderCardEl(card, { compact = false, detail = false } = {}) {
   if (card.tags && card.tags.length) {
     const t = document.createElement('div');
     t.className = 'card-tags';
-    t.innerHTML = card.tags.map((tg) => `<span class="tag">${TAG_ICON[tg] || tg}</span>`).join('');
+    t.innerHTML = card.tags.map((tg) => `<span class="tag">${globalThis.TAG_ICON[tg] || tg}</span>`).join('');
     meta.appendChild(t);
   }
   if (card.attach) {
@@ -511,42 +559,33 @@ function disableSwipe() {
 function ChoiceOverlay(o) {
   return new Promise((resolve) => {
     const ov = $('choice-overlay');
-    const list = $('choice-cards');
-    const title = $('choice-title');
     const variant = o.variant || 'compact';
 
     if (o.mode === 'reorder') {
-      const working = o.items.slice();
-      const ordered = [];
-      const draw = () => {
-        list.innerHTML = '';
-        if (working.length === 0) { ov.classList.add('hidden'); resolve(ordered); return; }
-        title.textContent = o.title;
-        for (const c of working) {
-          const el = CardView(c, { variant, interactive: 'click', onClick: () => {
-            ordered.push(c);
-            working.splice(working.indexOf(c), 1);
-            draw();
-          } });
-          list.appendChild(el);
-        }
-        ov.classList.remove('hidden');
+      const n = Math.min(o.count || 0, tc.state.game.deck.length);
+      if (n < 1) { resolve([]); return; }
+      currentChoice = {
+        title: o.title,
+        variant,
+        mode: 'reorder',
+        resolve,
+        working: tc.state.game.deck.slice(0, n),
+        ordered: [],
       };
-      draw();
-      return;
+    } else {
+      if (o.items.length === 0) { resolve(null); return; }
+      currentChoice = {
+        items: o.items,
+        title: o.title,
+        variant,
+        mode: 'select',
+        resolve,
+      };
     }
 
-    if (o.items.length === 0) { resolve(null); return; }
-    title.textContent = o.title;
-    list.innerHTML = '';
-    for (const item of o.items) {
-      const el = CardView(item, { variant, interactive: 'click', onClick: () => {
-        ov.classList.add('hidden');
-        resolve(item);
-      } });
-      list.appendChild(el);
-    }
+    renderChoiceOverlay();
     ov.classList.remove('hidden');
+    $('btn-choice-toggle').classList.remove('hidden');
   });
 }
 
@@ -590,10 +629,19 @@ function openDetail(c, opts = {}) {
 
   const vp = c.vpEffective != null ? c.vpEffective : (c.vp || 0);
   let hintText = '';
-  if (vp) hintText += 'ПО — победные очки. ';
   if (c.asleep) {
     const sleeper = (c.attached || []).find((a) => a.sleep);
-    hintText += 'Спит: накрыт(а) картой «' + (sleeper ? sleeper.name : '?') + '».';
+    hintText = 'Спит: накрыт(а) картой «' + (sleeper ? sleeper.name : '?') + '».';
+  } else {
+    const bd = c.vpBreakdown || [];
+    if (bd.length > 1) {
+      const parts = bd.map((b) => (b.value >= 0 ? '+' : '') + b.value + ' ' + b.label);
+      hintText = 'ПО: ' + vp + ' (' + parts.join(', ') + ')';
+    } else if (vp !== 0) {
+      hintText = 'ПО — победные очки (' + vp + ')';
+    } else {
+      hintText = 'ПО — победные очки.';
+    }
   }
   if (hintText) {
     const hint = document.createElement('div');
@@ -714,6 +762,8 @@ $('log-close').onclick = () => $('log-drawer').classList.add('hidden');
 $('detail-close').onclick = () => $('detail-overlay').classList.add('hidden');
 $('discard-close').onclick = () => $('discard-overlay').classList.add('hidden');
 $('btn-discard-view').onclick = openDiscard;
+$('choice-close').onclick = hideChoiceOverlay;
+$('btn-choice-toggle').onclick = toggleChoiceOverlay;
 
 // PWA
 if ('serviceWorker' in navigator) {

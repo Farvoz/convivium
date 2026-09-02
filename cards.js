@@ -23,10 +23,10 @@ const cards = [
   {
     name: 'Комната 402',
     icon: '🚪',
-    description: '❗️ Сбрось Порванную струну; прочие Угрозы (кроме Обхода) замешиваются в колоду взакрытую.',
+    description: '❗️ Нейтрализует Порванную струну (вес = 0); прочие Угрозы замешиваются в колоду',
     tags: ['place'],
     effects: [
-      { when: 'enter', op: 'discardTarget', filter: { name: 'Порванная струна' } },
+      { op: 'threatWeightSet', match: { name: 'Порванная струна' }, value: 0 },
       { when: 'enter', op: 'replace', match: { tags: ['place'] }, in: 'home' },
       { when: 'enter', op: 'shuffleThreats' },
     ],
@@ -34,10 +34,10 @@ const cards = [
   {
     name: 'Дворик',
     icon: '🏡',
-    description: '❗️ Сбрось Шум; прочие Угрозы (кроме Обхода) замешиваются в колоду взакрытую.',
+    description: '❗️ Нейтрализует Шум (вес = 0); прочие Угрозы замешиваются в колоду',
     tags: ['place'],
     effects: [
-      { when: 'enter', op: 'discardTarget', filter: { name: 'Шум' } },
+      { op: 'threatWeightSet', match: { name: 'Шум' }, value: 0 },
       { when: 'enter', op: 'replace', match: { tags: ['place'] }, in: 'home' },
       { when: 'enter', op: 'shuffleThreats' },
     ],
@@ -45,25 +45,31 @@ const cards = [
   {
     name: 'Ваня',
     face: 'faces/face_vanya.jpg',
-    description: '',
+    description: '🔄 Достань Звёздный час из сброса (2⚡, остаётся в Доме)',
     tags: ['guitarist', 'man'],
     vp: 1,
+    cost: '🔄',
+    costType: 'energy',
+    activate: [{ op: 'retrieveFromDiscard', filter: { name: 'Звёздный час' }, energycost: 2 }],
   },
   {
     name: 'Шура',
     face: 'faces/face_shurik.jpg',
-    description: '',
+    description: '🔄 Достань Звёздный час из сброса (1⚡, остаётся в Доме)',
     tags: ['guitarist', 'man'],
     vp: 1,
+    cost: '🔄',
+    costType: 'energy',
     effects: [
       { when: 'enter', op: 'replace', match: { name: 'Шура: бухой' }, in: 'home' },
     ],
+    activate: [{ op: 'retrieveFromDiscard', filter: { name: 'Звёздный час' }, energycost: 1 }],
   },
   {
     name: 'Шура: бухой',
     face: 'faces/face_shurik.jpg',
     description: '❗️ Заменяет Шуру, если он в игре. Теперь Шум расценивается в 2 Угрозы',
-    tags: ['man'],
+    tags: ['man', 'drunk'],
     arrow: 'down',
     effects: [
       { when: 'enter', op: 'replace', match: { name: 'Шура' }, in: 'home' },
@@ -109,15 +115,18 @@ const cards = [
   {
     name: 'Плов',
     icon: '🍚',
-    description: 'Если Паша в игре, то можно купить бесплатно',
-    vp: 1,
-    effects: [{ op: 'buyFreeIf', match: { name: 'Паша' } }],
+    description: 'Если Паша в игре, то можно купить бесплатно. Замешай 1 Угрозу в колоду',
+    vp: 2,
+    effects: [
+      { op: 'buyFreeIf', match: { name: 'Паша' } },
+      { when: 'enter', op: 'pullReserve' },
+    ],
   },
   {
     name: 'Паша: бухой',
     face: 'faces/face_pavel.jpg',
     description: '❗️ Заменяет Пашу, если он в игре. А также замешай 1 карту Угрозы взакрытую',
-    tags: ['man'],
+    tags: ['man', 'drunk'],
     arrow: 'down',
     effects: [
       { when: 'enter', op: 'replace', match: { name: 'Паша' }, in: 'home' },
@@ -127,9 +136,9 @@ const cards = [
   {
     name: 'Конфликт',
     icon: '💢',
-    description: 'Если в игре Паша: бухой, то -1 ПО',
+    description: 'Если в игре есть «бухой», то -1 ПО за каждого',
     arrow: 'up',
-    effects: [{ op: 'addVp', match: { name: 'Паша: бухой' }, amount: -1, if: { name: 'Паша: бухой' } }],
+    effects: [{ op: 'addVp', match: { tags: ['drunk'] }, amount: -1 }],
   },
   {
     name: 'День рождения!',
@@ -182,15 +191,17 @@ const cards = [
     name: '3-й сосед',
     face: 'faces/face_vova.jpg',
     tags: ['man'],
-    description: '❗️ Если в Доме уже есть Стол — при вскрытии сбрось Стол и себя.',
+    description: '❗️ Если в Доме уже есть Вова — при вскрытии сбрось Вову и себя.',
     effects: [
-      { op: 'discardWith', match: { name: 'Стол' }, in: 'home' },
+      { op: 'discardWith', match: { name: 'Вова' }, in: 'home' },
     ],
   },
   {
-    name: 'Стол',
-    icon: '🍽️',
+    name: 'Вова',
+    face: 'faces/face_vova.jpg',
+    tags: ['man'],
     description: '⚡ Пока в Доме: при вскрытии Угрозы или авто-карты получи 1 энергию.',
+    vp: 1,
     effects: [
       { op: 'energyOnReveal', amount: 1 },
     ],
@@ -198,17 +209,17 @@ const cards = [
   {
     name: 'Старшекур',
     icon: '🧓',
-    description: 'Сбрось выбранную карту Угрозы',
+    description: 'Сбрось выбранную карту Угрозы или авто-карту из Дома',
     cost: '🔄',
     tags: ['man'],
-    activate: [{ op: 'discardTarget', filter: { zone: 'threat' } }],
+    activate: [{ op: 'discardTarget', filter: {}, zone: 'both' }],
   },
   {
     name: 'Массовый перекур',
     icon: '🚬',
-    description: 'Посмотри 3 карты с верха колоды, а затем положи в удобном порядке обратно',
+    description: 'Посмотри столько карт с верха колоды, сколько людей в игре, а затем положи в удобном порядке обратно',
     cost: '🔄',
-    activate: [{ op: 'peekReorder', count: 3 }],
+    activate: [{ op: 'peekReorder', count: 'people' }],
   },
   {
     name: 'Тост',

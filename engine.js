@@ -73,13 +73,27 @@ const OP_REGISTRY = {
   },
   discardTarget: {
     kind: 'action', when: 'enter', phaseable: true,
-    validate(e, where) { validateMatch(e.filter, where + '.discardTarget'); },
+    validate(e, where) {
+      validateMatch(e.filter, where + '.discardTarget');
+      if (e.zone !== undefined && !['home', 'threat', 'both'].includes(e.zone)) {
+        throw new Error(`${where}: discardTarget.zone home|threat|both`);
+      }
+    },
     run(game, source, e) {
-      const pool = game.threat.filter((c) => c.threat !== false && matches(game, c, e.filter || {}, 'threat'));
+      const zones = e.zone === 'both' ? [game.threat, game.home]
+        : e.zone === 'home' ? [game.home]
+        : [game.threat];
+      let pool = [];
+      for (const z of zones) {
+        pool.push(...z.filter((c) => {
+          if (z === game.threat && c.threat === false) return false;
+          return matches(game, c, e.filter || {});
+        }));
+      }
       if (pool.length) {
         const chosen = game.choose(pool);
         detachAttachments(game, chosen);
-        removeFromZone(game.threat, chosen);
+        for (const z of zones) removeFromZone(z, chosen);
         game.discard.push(chosen);
       }
     },
@@ -88,7 +102,17 @@ const OP_REGISTRY = {
     kind: 'action', when: 'enter', phaseable: true,
     validate() {},
     run(game) {
-      for (const c of game.threat.filter((c) => isThreat(c))) {
+      const neutralized = new Set();
+      for (const c of inPlayCards(game)) {
+        for (const e of c.effects || []) {
+          if (e.op === 'threatWeightSet' && e.value === 0) {
+            for (const t of game.threat) {
+              if (matches(game, t, e.match)) neutralized.add(t);
+            }
+          }
+        }
+      }
+      for (const c of game.threat.filter((c) => isThreat(c) && !neutralized.has(c))) {
         removeFromZone(game.threat, c);
         c.faceDown = true;
         const idx = Math.floor(game.rng() * (game.deck.length + 1));
@@ -98,15 +122,18 @@ const OP_REGISTRY = {
   },
   peekReorder: {
     kind: 'action', when: undefined, phaseable: true,
-    validate(e, where) { if (typeof e.count !== 'number') throw new Error(`${where}: peekReorder.count number`); },
+    validate(e, where) {
+      if (e.count !== 'people' && typeof e.count !== 'number') {
+        throw new Error(`${where}: peekReorder.count number|'people'`);
+      }
+    },
     run(game, source, e) {
-      const n = Math.min(e.count || 0, game.deck.length);
+      const n = e.count === 'people'
+        ? inPlayCards(game).filter((c) => isPerson(c) && !deriveAsleepSet(game).has(c)).length
+        : Math.min(e.count || 0, game.deck.length);
       if (n < 1) return;
       const top = game.deck.splice(0, n);
       const cb = (typeof game.reorder === 'function') ? game.reorder(top) : top;
-      // Защита: reorder должен вернуть ровно n карт. Иначе колода молча
-      // укорачивается (вплоть до опустошения -> ложная победа). Возвращаем
-      // исходный top без изменения порядка — колода остаётся целой.
       const ordered = (Array.isArray(cb) && cb.length === top.length) ? cb : top;
       game.deck.unshift(...ordered);
     },
@@ -186,6 +213,26 @@ const OP_REGISTRY = {
     kind: 'action', when: undefined, phaseable: false, reveal: true, post: true,
     validate(e, where) { if (typeof e.amount !== 'number') throw new Error(`${where}: energyOnReveal.amount number`); },
   },
+  retrieveFromDiscard: {
+    kind: 'action', when: undefined, phaseable: true,
+    validate(e, where) { validateMatch(e.filter, where + '.retrieveFromDiscard'); },
+    run(game, source, e) {
+      const pool = game.discard.filter((c) => matches(game, c, e.filter || {}));
+      if (!pool.length) return;
+      const chosen = game.choose(pool);
+      removeFromZone(game.discard, chosen);
+      source.attached = source.attached || [];
+      source.attached.push(chosen);
+      chosen.attachedTo = source.name;
+    },
+  },
+  threatWeightSet: {
+    kind: 'derive', phaseable: false,
+    validate(e, where) {
+      validateMatch(e.match, where + '.threatWeightSet');
+      if (typeof e.value !== 'number') throw new Error(`${where}: threatWeightSet.value number`);
+    },
+  },
 };
 
 const ALL_OPS = Object.keys(OP_REGISTRY);
@@ -245,6 +292,9 @@ function validateCard(c, idx) {
     throw new Error(`${where}: tags string[]`);
   }
   if (c.cost !== undefined && c.cost !== '🔄') throw new Error(`${where}: cost 🔄`);
+  if (c.costType !== undefined && !['discard', 'energy'].includes(c.costType)) {
+    throw new Error(`${where}: costType discard|energy`);
+  }
   if (c.attach !== undefined) {
     if (typeof c.attach !== 'object') throw new Error(`${where}: attach object`);
     validateMatch(c.attach.match, where + '.attach');
@@ -263,9 +313,9 @@ function validateCard(c, idx) {
     if (typeof c.loseIf.threatsCount !== 'number') throw new Error(`${where}: loseIf.threatsCount number`);
   }
   if (c.tags && c.tags.includes('place')) {
-    const dt = (c.effects || []).find((e) => e.op === 'discardTarget');
-    if (!dt || !dt.filter || typeof dt.filter.name !== 'string' || !dt.filter.name) {
-      throw new Error(`${where}: place card needs discardTarget with filter.name`);
+    const tws = (c.effects || []).find((e) => e.op === 'threatWeightSet');
+    if (!tws || !tws.match || typeof tws.match.name !== 'string' || !tws.match.name) {
+      throw new Error(`${where}: place card needs threatWeightSet with match.name`);
     }
     if (!(c.effects || []).some((e) => e.op === 'shuffleThreats')) {
       throw new Error(`${where}: place card needs shuffleThreats effect`);
@@ -277,7 +327,12 @@ function validateCard(c, idx) {
   }
   if (c.activate !== undefined) {
     if (!Array.isArray(c.activate)) throw new Error(`${where}: activate array`);
-    c.activate.forEach((e, i) => validateEffect(e, `${where}.activate[${i}]`, true));
+    c.activate.forEach((e, i) => {
+      validateEffect(e, `${where}.activate[${i}]`, true);
+      if (e.energycost !== undefined && (typeof e.energycost !== 'number' || e.energycost < 0)) {
+        throw new Error(`${where}.activate[${i}].energycost non-negative number`);
+      }
+    });
   }
 }
 
@@ -605,19 +660,25 @@ function activate(game, name) {
   if (game.status !== 'playing') return game;
   const asleep = deriveAsleepSet(game);
   const card = [...game.home, ...game.threat].find((c) => c.name === name && c.cost === '🔄');
-  if (!card) return game; // из сброса/вне игры — не работает
-  if (asleep.has(card)) return game; // спящая карта не применяет эффекты
+  if (!card) return game;
+  if (asleep.has(card)) return game;
   const g = cloneGame(game);
   const live = [...g.home, ...g.threat].find((c) => c.name === name && c.cost === '🔄');
   for (const e of live.activate || []) {
     if (e.if && !conditionMet(g, e.if)) continue;
+    if (live.costType === 'energy' && e.energycost !== undefined) {
+      if (g.energy < e.energycost) continue;
+      g.energy -= e.energycost;
+    }
     const entry = OP_REGISTRY[e.op];
     if (entry && entry.kind === 'action') entry.run(g, live, e);
   }
-  const zone = g.home.includes(live) ? g.home : g.threat;
-  detachAttachments(g, live);
-  removeFromZone(zone, live);
-  g.discard.push(live);
+  if (live.costType !== 'energy') {
+    const zone = g.home.includes(live) ? g.home : g.threat;
+    detachAttachments(g, live);
+    removeFromZone(zone, live);
+    g.discard.push(live);
+  }
   g.status = deriveStatus(g);
   checkAttachInvariant(g);
   checkPlaceInvariant(g);
@@ -728,6 +789,12 @@ function deriveSnapshot(game) {
     let w = 1;
     for (const card of inPlay) {
       if (card.threatWeight && matches(game, c, card.threatWeight.match)) { w = card.threatWeight.weight; break; }
+    }
+    // threatWeightSet перезаписывает вес (Дворик нейтрализует Шум и т.п.)
+    for (const card of inPlay) {
+      for (const e of card.effects || []) {
+        if (e.op === 'threatWeightSet' && matches(game, c, e.match)) { w = e.value; }
+      }
     }
     threatRows.push({ card: c, weight: w });
   }
@@ -846,11 +913,16 @@ function removeCard(game, card) {
 }
 
 // Аттач-карта не может лежать отдельно: уходит в сброс вместе с владельцем.
+// Если владелец — Кровать (sleep), attached карта «просыпается» и возвращается в home.
 function detachAttachments(game, card) {
   if (!card.attached || card.attached.length === 0) return;
   for (const a of card.attached) {
     delete a.attachedTo;
-    game.discard.push(a);
+    if (card.sleep) {
+      game.home.push(a);
+    } else {
+      game.discard.push(a);
+    }
   }
   card.attached = [];
 }

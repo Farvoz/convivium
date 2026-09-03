@@ -276,6 +276,14 @@ const cards = [
       { when: 'enter', op: 'discardTarget', zone: 'both', filter: { arrow: { $in: ['up', 'down'] } } },
     ],
   },
+  {
+    name: 'Отвлечь',
+    icon: '🎭',
+    description: '🔄 Если в игре есть «Обход», замешайте его обратно в колоду лицом вниз',
+    cost: '🔄',
+    costType: 'discard',
+    activate: [{ op: 'returnToDeck', from: 'threat', match: { name: 'Обход' } }],
+  },
 ];
 
 globalThis.cards = cards;

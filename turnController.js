@@ -214,6 +214,9 @@
       state.game.choose = (opts) => opts[0];
       state.game.reorder = (top) => top;
       log('Активировано: ' + name);
+      if (card.activate && card.activate.some((e) => e.op === 'returnToDeck')) {
+        log('↩️ Обход замешан обратно в колоду');
+      }
       if (state.game.status !== 'playing') {
         state.phase = 'gameover';
         render();

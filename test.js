@@ -7,7 +7,7 @@ import './engine.js';
 import './turnController.js';
 const { cards } = globalThis;
 const {
-  createGame, setup, takeTurn, runTurnStart, resolveTop, getScore, getState, activate, deriveThreatCount, deriveScoreBreakdown, deriveBuyCost, validateCards, checkAttachInvariant, cloneCard, buildDeck, applyRevealPreEffects, applyRevealPostEffects,
+  createGame, setup, takeTurn, runTurnStart, resolveTop, getScore, getState, activate, deriveThreatCount, deriveScoreBreakdown, deriveBuyCost, validateCards, checkAttachInvariant, cloneCard, buildDeck, applyRevealPreEffects, applyRevealPostEffects, canActivate,
 } = globalThis.Convivium;
 
 // ---- helpers -------------------------------------------------------------
@@ -1918,4 +1918,100 @@ test('R6: блокировка replace без Внимания — старая 
   assert.ok(!drunk, 'Шура: бухой ушёл (заменён)');
   assert.ok(shura, 'Шура трезвый занял место');
   assert.equal(s.energy, 0, 'энергия потрачена (покупка состоялась, защиты не было)');
+});
+
+// ---- S. Отвлечь (🔄 возвращает Обход из threat в deck) -------------------
+
+test('S1: Отвлечь — карта проходит validateCards (нет throw при загрузке)', () => {
+  const otvlech = cards.find((c) => c.name === 'Отвлечь');
+  assert.ok(otvlech, 'карта Отвлечь определена');
+  assert.equal(otvlech.vp, undefined, 'без ПО');
+  assert.deepEqual(otvlech.activate, [{ op: 'returnToDeck', from: 'threat', match: { name: 'Обход' } }]);
+  assert.equal(otvlech.cost, '🔄', 'cost = 🔄');
+  assert.equal(otvlech.costType, 'discard', 'costType = discard');
+  validateCards([otvlech]);
+});
+
+test('S2: Отвлечь в buildDeck — ровно 1 копия', () => {
+  const deck = buildDeck();
+  const count = deck.filter((c) => c.name === 'Отвлечь').length;
+  assert.equal(count, 1, 'ровно 1 копия Отвлечь в колоде');
+});
+
+test('S3: активация Отвлечь убирает Обход из threat и кладёт его в deck лицом вниз', () => {
+  const g = createGame({ deck: [], choose: (opts) => opts[0] });
+  g.energy = 2;
+  g.threat = [cloneCard(byName['Обход'])];
+  g.home = [cloneCard(byName['Отвлечь'])];
+  const deckLenBefore = g.deck.length;
+  const after = activate(g, 'Отвлечь');
+  const s = getState(after);
+  assert.equal(s.threat.some((c) => c.name === 'Обход'), false, 'Обход ушёл из threat');
+  const obhodInDeck = s.deck.find((c) => c.name === 'Обход');
+  assert.ok(obhodInDeck, 'Обход появился в deck');
+  assert.equal(obhodInDeck.faceDown, true, 'Обход лежит в deck лицом вниз');
+  assert.equal(s.deck.length, deckLenBefore + 1, 'длина deck выросла на 1');
+  assert.equal(s.discard.some((c) => c.name === 'Отвлечь'), true, 'Отвлечь ушёл в сброс после 🔄');
+  assert.equal(after.status, 'playing', 'игра продолжается');
+});
+
+test('S4: без Обхода в threat — canActivate false (карта не подсвечивается)', () => {
+  const g = createGame({ deck: [], choose: (opts) => opts[0] });
+  g.energy = 2;
+  const otvlech = cloneCard(byName['Отвлечь']);
+  g.home = [otvlech];
+  assert.equal(canActivate(g, otvlech), false, 'без Обхода активировать нельзя');
+});
+
+test('S5: с Обходом в threat — canActivate true', () => {
+  const g = createGame({ deck: [], choose: (opts) => opts[0] });
+  g.energy = 2;
+  g.threat = [cloneCard(byName['Обход'])];
+  const otvlech = cloneCard(byName['Отвлечь']);
+  g.home = [otvlech];
+  assert.equal(canActivate(g, otvlech), true, 'с Обходом в threat активировать можно');
+});
+
+test('S6: match по имени ловит именно Обход, не другую карту', () => {
+  const g = createGame({ deck: [], choose: (opts) => opts[0] });
+  g.energy = 2;
+  g.threat = [cloneCard(byName['Шум']), cloneCard(byName['Обход']), cloneCard(byName['День рождения!'])];
+  g.home = [cloneCard(byName['Отвлечь'])];
+  const after = activate(g, 'Отвлечь');
+  const s = getState(after);
+  assert.equal(s.threat.some((c) => c.name === 'Обход'), false, 'Обход ушёл');
+  assert.equal(s.threat.some((c) => c.name === 'Шум'), true, 'Шум остался');
+  assert.equal(s.threat.some((c) => c.name === 'День рождения!'), true, 'День рождения! остался');
+});
+
+test('S7: после активации Отвлечь в threat нет ни одной карты — canActivate false', () => {
+  const g = createGame({ deck: [], choose: (opts) => opts[0] });
+  g.energy = 2;
+  g.threat = [cloneCard(byName['Обход'])];
+  g.home = [cloneCard(byName['Отвлечь'])];
+  const after1 = activate(g, 'Отвлечь');
+  // Обход ушёл в deck, threat пуст — повторная активация Отвлечь уже невозможна (карта в сбросе)
+  // но проверяем что новой Отвлечь в этом состоянии не подсвечивается
+  const otvlech2 = cloneCard(byName['Отвлечь']);
+  after1.home.push(otvlech2);
+  assert.equal(canActivate(after1, otvlech2), false, 'без Обхода в threat повторно не подсвечивается');
+});
+
+test('S8: возврат Обхода в deck продлевает игру (после активации колода не пуста)', () => {
+  const g = createGame({ deck: [cloneCard(byName['Плов'])], choose: (opts) => opts[0] });
+  g.energy = 2;
+  g.threat = [cloneCard(byName['Обход'])];
+  g.home = [cloneCard(byName['Отвлечь'])];
+  const after = activate(g, 'Отвлечь');
+  const s = getState(after);
+  assert.ok(s.deck.length >= 1, 'в deck есть как минимум 1 карта (Плов + возвращённый Обход)');
+  assert.equal(after.status, 'playing', 'статус не стал won/lost от активации');
+});
+
+test('S9: отработанная Отвлечь видна в buildDeck 1 раз, как и остальные карты', () => {
+  const deck = buildDeck();
+  const names = deck.map((c) => c.name);
+  const otvlechIdx = names.indexOf('Отвлечь');
+  assert.ok(otvlechIdx >= 0, 'Отвлечь в колоде');
+  assert.equal(names.filter((n) => n === 'Отвлечь').length, 1, 'ровно 1 копия');
 });

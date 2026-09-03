@@ -60,6 +60,24 @@ const OP_REGISTRY = {
       game.deck.splice(idx, 0, t);
     },
   },
+  returnToDeck: {
+    kind: 'action', when: undefined, phaseable: true,
+    validate(e, where) {
+      validateMatch(e.match, where + '.returnToDeck');
+      if (!['threat', 'home'].includes(e.from)) {
+        throw new Error(`${where}: returnToDeck.from threat|home`);
+      }
+    },
+    run(game, source, e) {
+      const zone = e.from === 'threat' ? game.threat : game.home;
+      const target = zone.find((c) => matches(game, c, e.match));
+      if (!target) return;
+      removeFromZone(zone, target);
+      target.faceDown = true;
+      const idx = Math.floor(game.rng() * (game.deck.length + 1));
+      game.deck.splice(idx, 0, target);
+    },
+  },
   accumulate: {
     kind: 'action', when: 'turnStart', phaseable: true,
     validate(e, where) { if (typeof e.max !== 'number') throw new Error(`${where}: accumulate.max number`); },
@@ -1047,6 +1065,10 @@ function canActivate(game, card) {
     } else if (e.op === 'peekReorder') {
       const n = derivePeekCount(game, e.count);
       if (n < 1) continue;
+      return true;
+    } else if (e.op === 'returnToDeck') {
+      const zone = e.from === 'threat' ? game.threat : game.home;
+      if (zone.find((c) => matches(game, c, e.match || {})) === undefined) continue;
       return true;
     } else {
       return true;

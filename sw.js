@@ -1,9 +1,9 @@
-const VERSION = 'v2';
+const VERSION = 'v3';
 const CACHE = 'convivium-' + VERSION;
 const ASSETS = [
   './', './index.html', './style.css', './app.js', './cards.js', './engine.js',
   './manifest.webmanifest', './icon.svg',
-  './faces/face_vanya.jpg', './faces/face_olya.jpg', './faces/face_den.jpg',
+  './faces/face_vanya.jpg', './faces/face_olya.jpg',
   './faces/face_shurik.jpg', './faces/face_pavel.jpg', './faces/face_vova.jpg',
 ];
 

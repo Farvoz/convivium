@@ -128,9 +128,7 @@ const OP_REGISTRY = {
       }
     },
     run(game, source, e) {
-      const n = e.count === 'people'
-        ? inPlayCards(game).filter((c) => isPerson(c) && !deriveAsleepSet(game).has(c)).length
-        : Math.min(e.count || 0, game.deck.length);
+      const n = derivePeekCount(game, e.count);
       if (n < 1) return;
       const top = game.deck.splice(0, n);
       const cb = (typeof game.reorder === 'function') ? game.reorder(top) : top;
@@ -220,10 +218,25 @@ const OP_REGISTRY = {
       const pool = game.discard.filter((c) => matches(game, c, e.filter || {}));
       if (!pool.length) return;
       const chosen = game.choose(pool);
-      removeFromZone(game.discard, chosen);
+      const card = pool.find((c) => c.name === (chosen && chosen.name)) || pool[0];
+      removeFromZone(game.discard, card);
       source.attached = source.attached || [];
-      source.attached.push(chosen);
-      chosen.attachedTo = source.name;
+      source.attached.push(card);
+      card.attachedTo = source.name;
+    },
+  },
+  playFromDiscard: {
+    kind: 'action', when: undefined, phaseable: true,
+    validate(e, where) { validateMatch(e.filter, where + '.playFromDiscard'); },
+    run(game, source, e) {
+      const pool = game.discard.filter((c) => matches(game, c, e.filter || {}));
+      if (!pool.length) return;
+      const chosen = game.choose(pool);
+      const card = pool.find((c) => c.name === (chosen && chosen.name)) || pool[0];
+      removeFromZone(game.discard, card);
+      const played = cloneCard(card);
+      game.home.push(played);
+      runEnterActions(game, played);
     },
   },
   threatWeightSet: {
@@ -662,6 +675,13 @@ function activate(game, name) {
   const card = [...game.home, ...game.threat].find((c) => c.name === name && c.cost === '🔄');
   if (!card) return game;
   if (asleep.has(card)) return game;
+  // Вася: если в сбросе нет места — активация недоступна, не тратим карту
+  const hasPlay = (card.activate || []).some((e) => e.op === 'playFromDiscard');
+  if (hasPlay) {
+    const op = (card.activate || []).find((e) => e.op === 'playFromDiscard');
+    const pool = game.discard.filter((c) => matches(game, c, op.filter || {}));
+    if (pool.length === 0) return game;
+  }
   const g = cloneGame(game);
   const live = [...g.home, ...g.threat].find((c) => c.name === name && c.cost === '🔄');
   for (const e of live.activate || []) {
@@ -693,6 +713,20 @@ function deriveAsleepSet(game) {
     if (owner.attached && owner.attached.some((a) => a.sleep)) set.add(owner);
   }
   return set;
+}
+
+function deriveAwakePersons(game) {
+  const asleep = deriveAsleepSet(game);
+  return inPlayCards(game).filter((c) => isPerson(c) && !asleep.has(c));
+}
+
+function deriveAwakePersonCount(game) {
+  return deriveAwakePersons(game).length;
+}
+
+function derivePeekCount(game, countSpec) {
+  if (countSpec === 'people') return Math.min(deriveAwakePersonCount(game), game.deck.length);
+  return Math.min(countSpec || 0, game.deck.length);
 }
 
 // Единый снапшот производных состояний за один проход. Раньше логика была
@@ -804,7 +838,7 @@ function deriveSnapshot(game) {
     for (const e of c.effects || []) {
       if (e.op === 'scorePerPerson') {
         if (e.if && !conditionMet(game, e.if)) continue;
-        const persons = inPlay.filter((p) => isPerson(p) && !asleep.has(p)).length;
+        const persons = deriveAwakePersonCount(game);
         const add = e.amount * persons;
         if (add) {
           vp.set(c, (vp.get(c) || 0) + add);
@@ -1007,5 +1041,5 @@ function buildDeck(opts = {}, rng = Math.random) {
 globalThis.Convivium = {
   createGame, setup, takeTurn, runTurnStart, getTopCard, resolveTop, activate, getState, getScore,
   deriveThreatCount, deriveThreatBreakdown, deriveScoreBreakdown, deriveStatus, deriveBuyCost, isThreat, validateCards, checkAttachInvariant,
-  matches, conditionMet, deriveAsleepSet, isPerson, isBuyFree, cloneCard, buildDeck, findInterceptor, findInterceptors, discardWithTarget, applyRevealPreEffects, applyRevealPostEffects,
+  matches, conditionMet, deriveAsleepSet, deriveAwakePersons, deriveAwakePersonCount, derivePeekCount, isPerson, isBuyFree, cloneCard, buildDeck, findInterceptor, findInterceptors, discardWithTarget, applyRevealPreEffects, applyRevealPostEffects,
 };

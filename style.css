@@ -69,7 +69,7 @@ html, body {
   display: flex;
   flex-direction: column;
   padding: var(--sp-8) var(--sp-8) calc(var(--sp-8) + env(safe-area-inset-bottom));
-  gap: var(--sp-12);
+  gap: var(--sp-8);
   overflow: hidden;
 }
 .hidden { display: none !important; }
@@ -219,7 +219,7 @@ h1 { font-size: var(--fs-xl); margin: 0; letter-spacing: 1px; }
 #home-strip {
   position: relative;
   z-index: 15;
-  height: 230px;
+  height: 223px;
   overflow: hidden;
 }
 
@@ -279,7 +279,6 @@ h1 { font-size: var(--fs-xl); margin: 0; letter-spacing: 1px; }
   gap: var(--sp-8);
   font-size: var(--fs-sm);
   color: var(--muted);
-  min-height: 52px;
   flex-shrink: 0;
 }
 

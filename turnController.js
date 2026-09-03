@@ -5,7 +5,7 @@
 (function () {
   const {
     createGame, setup, runTurnStart, getTopCard, resolveTop, activate: engineActivate,
-    deriveAsleepSet, isBuyFree, deriveBuyCost, matches, deriveThreatCount, findInterceptors,
+    deriveAsleepSet, derivePeekCount, isBuyFree, deriveBuyCost, matches, deriveThreatCount, findInterceptors,
     discardWithTarget,
   } = globalThis.Convivium;
 
@@ -21,7 +21,16 @@
     function collectActivatable() {
       const asleep = deriveAsleepSet(state.game);
       return [...state.game.home, ...state.game.threat]
-        .filter((c) => c.cost === '🔄' && !asleep.has(c))
+        .filter((c) => {
+          if (c.cost !== '🔄' || asleep.has(c)) return false;
+          const hasPlay = (c.activate || []).some((e) => e.op === 'playFromDiscard');
+          if (hasPlay) {
+            const f = (c.activate || []).find((e) => e.op === 'playFromDiscard').filter || {};
+            const pool = state.game.discard.filter((x) => matches(state.game, x, f));
+            if (pool.length === 0) return false;
+          }
+          return true;
+        })
         .map((c) => c.name);
     }
 
@@ -137,9 +146,25 @@
       if (!card) return;
       if (deriveAsleepSet(state.game).has(card)) return;
 
+      const needsPlay = (card.activate || []).some((e) => e.op === 'playFromDiscard');
       const needsTarget = (card.activate || []).some((e) => e.op === 'discardTarget');
       const needsReorder = (card.activate || []).some((e) => e.op === 'peekReorder');
       let chosen = null;
+      if (needsPlay) {
+        const op = (card.activate || []).find((e) => e.op === 'playFromDiscard');
+        const pool = state.game.discard.filter((c) => matches(state.game, c, op.filter || {}));
+        if (pool.length === 0) {
+          log('Нет мест в сбросе — активация отменена');
+          return;
+        }
+        if (pool.length === 1) {
+          state.game.choose = (opts) => opts.find((c) => c.name === pool[0].name) || opts[0];
+        } else {
+          const picked = await promptChoice({ kind: 'discardPlace', items: pool });
+          if (picked === null) return;
+          state.game.choose = (opts) => opts.find((c) => c.name === picked.name) || opts[0];
+        }
+      }
       if (needsTarget) {
         const dt = (card.activate || []).find((e) => e.op === 'discardTarget');
         const targetPool = dt
@@ -158,9 +183,9 @@
       }
       if (needsReorder) {
         const op = (card.activate || []).find((e) => e.op === 'peekReorder');
-        const n = Math.min(op.count || 3, state.game.deck.length);
+        const n = derivePeekCount(state.game, op.count);
         const items = state.game.deck.slice(0, n);
-        const ordered = await promptChoice({ kind: 'reorder', count: op.count || 3, items });
+        const ordered = await promptChoice({ kind: 'reorder', count: n, items });
         // reorder обязан вернуть ровно n карт; иначе не меняем порядок колоды.
         if (Array.isArray(ordered) && ordered.length === n) {
           state.game.reorder = (top) => ordered;

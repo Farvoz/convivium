@@ -9,7 +9,7 @@
 const {
   createGame, setup, getScore, getState, activate,
   runTurnStart, getTopCard, resolveTop, deriveThreatBreakdown, deriveScoreBreakdown,
-  deriveThreatCount, isThreat, matches, conditionMet, deriveAsleepSet, isPerson, isBuyFree, deriveBuyCost, findInterceptor,
+  deriveThreatCount, isThreat, matches, conditionMet, deriveAsleepSet, derivePeekCount, isPerson, isBuyFree, deriveBuyCost, findInterceptor,
   createTurnController, buildDeck, enableGesture, disableGesture,
 } = globalThis.Convivium;
 
@@ -245,7 +245,7 @@ function CardView(card, opts = {}) {
   if (interactive === 'activate') {
     el.classList.add('activatable');
     el.title = 'Активировать';
-    el.onclick = () => tc.activate(card.name);
+    el.onclick = () => openDetail(card, { onConfirm: () => tc.activate(card.name), confirmLabel: 'Активировать' });
   } else if (interactive === 'click') {
     el.classList.add('clickable');
     el.onclick = () => (onClick ? onClick(card) : openDetail(card));
@@ -562,14 +562,28 @@ function ChoiceOverlay(o) {
     const variant = o.variant || 'compact';
 
     if (o.mode === 'reorder') {
-      const n = Math.min(o.count || 0, tc.state.game.deck.length);
-      if (n < 1) { resolve([]); return; }
+      // o.items приоритетен (передал turnController), иначе считаем через derivePeekCount
+      let working;
+      if (Array.isArray(o.items) && o.items.length >= 0) {
+        working = o.items.slice();
+        // если items пришёл пустой, а count задан — пересчитать (совместимость)
+        if (working.length === 0 && o.count !== undefined) {
+          const n = derivePeekCount(tc.state.game, o.count);
+          if (n < 1) { resolve([]); return; }
+          working = tc.state.game.deck.slice(0, n);
+        }
+      } else {
+        const n = derivePeekCount(tc.state.game, o.count);
+        if (n < 1) { resolve([]); return; }
+        working = tc.state.game.deck.slice(0, n);
+      }
+      if (working.length < 1) { resolve([]); return; }
       currentChoice = {
         title: o.title,
         variant,
         mode: 'reorder',
         resolve,
-        working: tc.state.game.deck.slice(0, n),
+        working,
         ordered: [],
       };
     } else {
@@ -600,14 +614,27 @@ async function promptChoiceAdapter(payload) {
     return new Promise((res) => enterBoardTarget(items, res, null));
   }
   if (payload.kind === 'reorder') {
-    const n = Math.min(payload.count || 0, tc.state.game.deck.length);
-    if (n < 1) return [];
-    const working = tc.state.game.deck.slice(0, n);
+    // turnController уже передаёт count как число и items как срез; поддерживаем оба формата
+    let working;
+    if (Array.isArray(payload.items) && payload.items.length > 0) {
+      working = payload.items.slice();
+    } else {
+      const n = derivePeekCount(tc.state.game, payload.count);
+      if (n < 1) return [];
+      working = tc.state.game.deck.slice(0, n);
+    }
+    if (working.length < 1) return [];
     return ChoiceOverlay({ title: 'Расставь карты: выбери верхнюю', items: working, mode: 'reorder', variant: 'detail' });
   }
   if (payload.kind === 'interceptors') {
     const items = payload.items || [];
     return new Promise((res) => enterBoardTarget(items, res, null));
+  }
+  if (payload.kind === 'discardPlace') {
+    const items = payload.items || [];
+    if (items.length === 0) return null;
+    if (items.length === 1) return items[0];
+    return ChoiceOverlay({ title: 'Выбери место из сброса', items, mode: 'select', variant: 'compact' });
   }
   return null;
 }

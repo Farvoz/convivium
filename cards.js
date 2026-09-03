@@ -86,7 +86,7 @@ const cards = [
   {
     name: 'Натянуть струну',
     icon: '🎸',
-    description: 'Если в игре есть гитарист, то сбрось Порванную струну',
+    description: '🔄 Если в игре есть гитарист, то сбрось Порванную струну',
     cost: '🔄',
     activate: [
       { op: 'discardTarget', filter: { name: 'Порванная струна' }, if: { tags: ['guitarist'] } },
@@ -115,7 +115,7 @@ const cards = [
   {
     name: 'Плов',
     icon: '🍚',
-    description: 'Если Паша в игре, то можно купить бесплатно. Замешай 1 Угрозу в колоду',
+    description: 'Если Паша в игре, то можно купить бесплатно. ❗️ Замешай 1 Угрозу в колоду',
     vp: 2,
     effects: [
       { op: 'buyFreeIf', match: { name: 'Паша' } },
@@ -188,13 +188,12 @@ const cards = [
     effects: [{ op: 'intercept' }],
   },
   {
-    name: '3-й сосед',
-    face: 'faces/face_vova.jpg',
+    name: 'Вася',
+    face: 'faces/face_vasya.jpg',
     tags: ['man'],
-    description: '❗️ Если в Доме уже есть Вова — при вскрытии сбрось Вову и себя.',
-    effects: [
-      { op: 'discardWith', match: { name: 'Вова' }, in: 'home' },
-    ],
+    cost: '🔄',
+    description: '🔄 Найти в сбросе место и разыграть',
+    activate: [{ op: 'playFromDiscard', filter: { tags: ['place'] } }],
   },
   {
     name: 'Вова',
@@ -209,7 +208,7 @@ const cards = [
   {
     name: 'Старшекур',
     icon: '🧓',
-    description: 'Сбрось выбранную карту Угрозы или авто-карту из Дома',
+    description: '🔄 Сбрось выбранную карту Угрозы или авто-карту из Дома',
     cost: '🔄',
     tags: ['man'],
     activate: [{ op: 'discardTarget', filter: {}, zone: 'both' }],
@@ -217,7 +216,7 @@ const cards = [
   {
     name: 'Массовый перекур',
     icon: '🚬',
-    description: 'Посмотри столько карт с верха колоды, сколько людей в игре, а затем положи в удобном порядке обратно',
+    description: '🔄 Посмотри столько карт с верха колоды, сколько людей в игре, а затем положи в удобном порядке обратно',
     cost: '🔄',
     activate: [{ op: 'peekReorder', count: 'people' }],
   },

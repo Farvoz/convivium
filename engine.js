@@ -28,16 +28,24 @@ const OP_REGISTRY = {
     run(game, source, e) {
       const zone = e.in === 'threat' ? game.threat : game.home;
       const idx = zone.findIndex((c) => c !== source && matches(game, c, e.match));
-      if (idx >= 0) {
-        const [target] = zone.splice(idx, 1);
-        detachAttachments(game, target);
-        pushDiscard(game, target);
-        // источник занимает слот удалённой цели -> порядок зоны сохраняется
-        const srcIdx = zone.indexOf(source);
-        if (srcIdx >= 0 && srcIdx !== idx) {
-          zone.splice(srcIdx, 1);
-          zone.splice(idx, 0, source);
-        }
+      if (idx < 0) return;
+      const [target] = zone.splice(idx, 1);
+      // Защита: если у target в attached[] есть карта с blocks:['replace'],
+      // подмена отменяется — target возвращается на место, source уходит в сброс.
+      if (hasProtect(game, target, 'replace')) {
+        zone.splice(idx, 0, target);
+        removeFromZone(zone, source);
+        pushDiscard(game, source);
+        emit(game, { type: 'blocked', card: cloneCard(source), target: target.name, by: 'replace' });
+        return;
+      }
+      detachAttachments(game, target);
+      pushDiscard(game, target);
+      // источник занимает слот удалённой цели -> порядок зоны сохраняется
+      const srcIdx = zone.indexOf(source);
+      if (srcIdx >= 0 && srcIdx !== idx) {
+        zone.splice(srcIdx, 1);
+        zone.splice(idx, 0, source);
       }
     },
   },
@@ -298,6 +306,16 @@ const OP_REGISTRY = {
       if (typeof e.value !== 'number') throw new Error(`${where}: threatWeightSet.value number`);
     },
   },
+  modifyActivate: {
+    kind: 'derive', phaseable: false,
+    validate(e, where) {
+      validateMatch(e.match, where + '.modifyActivate');
+      if (!['energy', 'discard'].includes(e.cost)) throw new Error(`${where}: modifyActivate.cost energy|discard`);
+      if (e.energycost !== undefined && (typeof e.energycost !== 'number' || e.energycost < 0)) {
+        throw new Error(`${where}: modifyActivate.energycost non-negative number`);
+      }
+    },
+  },
 };
 
 const ALL_OPS = Object.keys(OP_REGISTRY);
@@ -311,12 +329,20 @@ function validateMatch(m, where) {
   if (m === undefined) return;
   if (typeof m !== 'object' || m === null) throw new Error(`${where}: match must be object`);
   for (const k of Object.keys(m)) {
-    if (!['name', 'tags', 'person', 'zone'].includes(k)) throw new Error(`${where}: unknown match key ${k}`);
+    if (!['name', 'arrow', 'tags', 'person', 'zone'].includes(k)) throw new Error(`${where}: unknown match key ${k}`);
   }
-  if (m.name !== undefined && typeof m.name !== 'string') throw new Error(`${where}: match.name string`);
+  if (m.name !== undefined) {
+    if (typeof m.name !== 'string' && !isInPattern(m.name)) throw new Error(`${where}: match.name string|$in`);
+  }
+  if (m.arrow !== undefined) {
+    if (typeof m.arrow !== 'string' && !isInPattern(m.arrow)) throw new Error(`${where}: match.arrow string|$in`);
+  }
   if (m.tags !== undefined) validateTags(m.tags, `${where}: match.tags`);
   if (m.person !== undefined && typeof m.person !== 'boolean') throw new Error(`${where}: match.person boolean`);
   if (m.zone !== undefined && !['home', 'threat'].includes(m.zone)) throw new Error(`${where}: match.zone home|threat`);
+}
+function isInPattern(v) {
+  return v && typeof v === 'object' && !Array.isArray(v) && Array.isArray(v.$in);
 }
 
 function validateCond(c, where) {
@@ -370,6 +396,15 @@ function validateCard(c, idx) {
     if (c.attach.bonusVp !== undefined && typeof c.attach.bonusVp !== 'number') throw new Error(`${where}: attach.bonusVp number`);
     if (c.attach.bonusIfTag !== undefined && typeof c.attach.bonusIfTag !== 'string') throw new Error(`${where}: attach.bonusIfTag string`);
     if (c.attach.choose !== undefined && typeof c.attach.choose !== 'boolean') throw new Error(`${where}: attach.choose boolean`);
+    if (c.attach.blocks !== undefined) {
+      if (!Array.isArray(c.attach.blocks) || !c.attach.blocks.every((b) => typeof b === 'string')) {
+        throw new Error(`${where}: attach.blocks string[]`);
+      }
+      const allowed = new Set(['replace', 'attach']);
+      for (const b of c.attach.blocks) {
+        if (!allowed.has(b)) throw new Error(`${where}: attach.blocks unknown kind ${b}`);
+      }
+    }
   }
   if (c.sleep !== undefined && typeof c.sleep !== 'boolean') throw new Error(`${where}: sleep boolean`);
   if (c.threatWeight !== undefined) {
@@ -379,7 +414,12 @@ function validateCard(c, idx) {
   }
   if (c.loseIf !== undefined) {
     if (typeof c.loseIf !== 'object') throw new Error(`${where}: loseIf object`);
-    if (typeof c.loseIf.threatsCount !== 'number') throw new Error(`${where}: loseIf.threatsCount number`);
+    if (c.loseIf.threatsCount !== undefined && typeof c.loseIf.threatsCount !== 'number') {
+      throw new Error(`${where}: loseIf.threatsCount number`);
+    }
+    if (c.loseIf.nextIsThreat !== undefined && typeof c.loseIf.nextIsThreat !== 'boolean') {
+      throw new Error(`${where}: loseIf.nextIsThreat boolean`);
+    }
   }
   if (c.tags && c.tags.includes('place')) {
     const tws = (c.effects || []).find((e) => e.op === 'threatWeightSet');
@@ -485,10 +525,17 @@ function matches(game, card, match, zone) {
     if (asleep.has(card)) return false; // спящий «пустой»: не матчится ни по имени/тегам/человеку
   }
   if (match.zone && zone && match.zone !== zone) return false;
-  if (match.name && card.name !== match.name) return false;
+  if (match.name && !matchScalar(card.name, match.name)) return false;
+  if (match.arrow !== undefined && !matchScalar(card.arrow, match.arrow)) return false;
   if (match.tags && !match.tags.every((t) => card.tags && card.tags.includes(t))) return false;
   if (match.person && !isPerson(card)) return false;
   return true;
+}
+function matchScalar(value, pattern) {
+  if (pattern && typeof pattern === 'object' && !Array.isArray(pattern) && '$in' in pattern) {
+    return pattern.$in.includes(value);
+  }
+  return value === pattern;
 }
 function conditionMet(game, cond) {
   if (!cond) return true;
@@ -690,6 +737,10 @@ function resolveTop(game, action) {
   }
   const card = g.deck.shift();
   placeCard(g, card, action);
+  if (g.status === 'lost') {
+    g.turnPhase = 'idle';
+    return g;
+  }
   applyRevealPostEffects(g, card);
   applyPhaseActions(g, 'turnEnd');
   g.status = deriveStatus(g);
@@ -726,10 +777,25 @@ function placeCard(g, card, action) {
     const free = isBuyFree(g, c);
     const cost = deriveBuyCost(g);
     if (action === 'buy' && (free || g.energy >= cost)) {
-      g.energy -= free ? 0 : cost;
+      const paid = free ? 0 : cost;
+      g.energy -= paid;
       g.home.push(c);
-      emit(g, { type: 'place', card: cloneCard(c), zone: 'home', cost: free ? 0 : cost });
+      emit(g, { type: 'place', card: cloneCard(c), zone: 'home', cost: paid });
+      if (c.loseIf && c.loseIf.nextIsThreat === true) {
+        const next = g.deck[0] || null;
+        if (next && next.arrow === 'up') {
+          emit(g, { type: 'deathReveal', card: cloneCard(next), source: cloneCard(c) });
+          g.status = 'lost';
+          return;
+        }
+      }
       runEnterActions(g, c);
+      // Refund: если покупка была отменена защитой (replace-блокировка),
+      // source ушёл в сброс, эффект не сработал — возвращаем энергию.
+      if (paid > 0 && g.discard.includes(c)) {
+        g.energy += paid;
+        emit(g, { type: 'refund', card: cloneCard(c), cost: paid });
+      }
     } else if (action === 'discard') {
       pushDiscard(g, c);
       const gain = (c.discardValue === 0 ? 0 : 1);
@@ -742,7 +808,25 @@ function placeCard(g, card, action) {
 }
 
 function isBuyFree(game, card) {
-  return (card.effects || []).some((e) => e.op === 'buyFreeIf' && conditionMet(game, e.match));
+  return (card.effects || []).some((e) => e.op === 'buyFreeIf' && buyFreeConditionMet(game, e.match, card));
+}
+
+function buyFreeConditionMet(game, cond, candidate) {
+  if (!cond) return true;
+  if (cond.threatsCount !== undefined) {
+    if (!conditionMet(game, cond)) return false;
+  }
+  const asleep = deriveAsleepSet(game);
+  const inPlay = inPlayCards(game).filter((c) => !asleep.has(c));
+  if (cond.name) {
+    if (candidate && candidate.name === cond.name) return true;
+    return inPlay.some((c) => c.name === cond.name);
+  }
+  if (cond.tags) {
+    if (candidate && cond.tags.every((t) => candidate.tags && candidate.tags.includes(t))) return true;
+    return inPlay.some((c) => cond.tags.every((t) => c.tags && c.tags.includes(t)));
+  }
+  return true;
 }
 
 function runEnterActions(g, card) {
@@ -752,7 +836,9 @@ function runEnterActions(g, card) {
 
 function applyAttach(g, card) {
   if (!card.attach) return;
-  const pool = g.home.filter((c) => c !== card && matches(g, c, card.attach.match));
+  // Защита от подкладывания: pool-члены с защитным attach-аттачем пропускаются.
+  // Не зависит от card.attach.blocks — защита живёт на самой цели.
+  let pool = g.home.filter((c) => c !== card && matches(g, c, card.attach.match) && !hasProtect(g, c, 'attach'));
   if (pool.length === 0) {
     removeFromZone(g.home, card);
     pushDiscard(g, card);
@@ -855,16 +941,20 @@ function activate(game, name) {
   if (!canActivate(game, card)) return game;
   const g = cloneGame(game);
   const live = [...g.home, ...g.threat].find((c) => c.name === name && c.cost === '🔄');
+  const eff = deriveEffectiveCost(g, live);
   for (const e of live.activate || []) {
     if (e.if && !conditionMet(g, e.if)) continue;
-    if (live.costType === 'energy' && e.energycost !== undefined) {
-      if (g.energy < e.energycost) continue;
-      g.energy -= e.energycost;
+    if (eff.costType === 'energy') {
+      const cost = eff.energycost !== undefined ? eff.energycost : e.energycost;
+      if (cost !== undefined) {
+        if (g.energy < cost) continue;
+        g.energy -= cost;
+      }
     }
     const entry = OP_REGISTRY[e.op];
     if (entry && entry.kind === 'action') entry.run(g, live, e);
   }
-  if (live.costType !== 'energy') {
+  if (eff.costType !== 'energy') {
     const zone = g.home.includes(live) ? g.home : g.threat;
     detachAttachments(g, live);
     removeFromZone(zone, live);
@@ -878,12 +968,41 @@ function activate(game, name) {
 
 // --- деривация (чистые функции, без хранения флагов) -----------------------
 
+// Сводит стоимость активации с учётом modifyActivate-эффектов от inPlay-карт.
+// Применяет ВСЕ подходящие модификаторы в порядке inPlay: последний выигрывает
+// (детерминированно, т.к. порядок home+threat фиксирован). Возвращает
+// { costType, energycost } — нормализованный объект для activate/canActivate.
+function deriveEffectiveCost(game, card) {
+  let costType = card.costType || 'discard';
+  let energycost;
+  for (const c of inPlayCards(game)) {
+    if (c === card) continue;
+    for (const e of c.effects || []) {
+      if (e.op !== 'modifyActivate') continue;
+      if (!matches(game, card, e.match)) continue;
+      costType = e.cost;
+      energycost = e.energycost;
+    }
+  }
+  return { costType, energycost };
+}
+
 function deriveAsleepSet(game) {
   const set = new Set();
   for (const owner of game.home) {
     if (owner.attached && owner.attached.some((a) => a.sleep)) set.add(owner);
   }
   return set;
+}
+
+// Защита: у `card` в attached[] есть attach-карта с attach.blocks, включающим `kind`.
+// kind ∈ 'replace' | 'attach'. Применяется как гард перед сбросом/подкладыванием.
+function hasProtect(game, card, kind) {
+  if (!card || !card.attached) return false;
+  for (const a of card.attached) {
+    if (a.attach && Array.isArray(a.attach.blocks) && a.attach.blocks.includes(kind)) return true;
+  }
+  return false;
 }
 
 function deriveAwakePersons(game) {
@@ -912,9 +1031,13 @@ function canActivate(game, card) {
   if (deriveAsleepSet(game).has(card)) return false;
   const acts = card.activate || [];
   if (acts.length === 0) return false;
+  const eff = deriveEffectiveCost(game, card);
   for (const e of acts) {
     if (e.if && !conditionMet(game, e.if)) continue;
-    if (card.costType === 'energy' && e.energycost !== undefined && game.energy < e.energycost) continue;
+    if (eff.costType === 'energy') {
+      const cost = eff.energycost !== undefined ? eff.energycost : e.energycost;
+      if (cost !== undefined && game.energy < cost) continue;
+    }
     if (e.op === 'retrieveFromDiscard' || e.op === 'playFromDiscard') {
       if (getDiscardPool(game, e.filter || {}).length === 0) continue;
       return true;
@@ -1105,7 +1228,7 @@ function deriveThreatBreakdown(game) {
 
 function deriveStatus(game) {
   for (const c of inPlayCards(game)) {
-    if (c.loseIf && deriveThreatCount(game) >= (c.loseIf.threatsCount || 0)) return 'lost';
+    if (c.loseIf && c.loseIf.threatsCount !== undefined && deriveThreatCount(game) >= c.loseIf.threatsCount) return 'lost';
   }
   if (game.deck.length === 0) return 'won';
   return 'playing';

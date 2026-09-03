@@ -522,6 +522,15 @@ async function submitDecision(action) {
   // phase='transition' — рубашка не показывается, анимация идёт на вскрытой карте
   if (tc.state.pendingEvents.length > 0) {
     await tc.drainEvents(async (ev) => {
+      if (ev.type === 'deathReveal') {
+        const wrap = $('center-card');
+        wrap.className = '';
+        wrap.innerHTML = '';
+        wrap.appendChild(CardView(ev.card, { variant: 'detail' }));
+        wrap.classList.remove('hidden');
+        await wait(1000);
+        return;
+      }
       const wrap = $('center-card');
       wrap.className = '';
       wrap.innerHTML = '';
@@ -537,13 +546,11 @@ async function submitDecision(action) {
       void wrap.offsetWidth;
       wrap.classList.add('fly-' + dir);
       await wait(520);
-      // спрятать до снятия класса — иначе snap-back в центр на мгновение; оставляем DOM для стабильной геометрии #deck-pile
       wrap.classList.add('hidden');
       wrap.classList.remove('fly-' + dir);
       await wait(80);
       if (ev.type === 'intercepted' && ev.owner) {
         const owner = ev.owner;
-        // drainEvents делает render после аниматора — подсветку отложим до нового DOM
         setTimeout(() => {
           const ownerEl = $('home-cards').querySelector('[data-name="' + owner + '"]');
           if (ownerEl) {

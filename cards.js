@@ -93,6 +93,12 @@ const cards = [
     ],
   },
   {
+    name: 'Внимание',
+    icon: '👁️',
+    description: '❗️ Подложи под любую карту в Доме. Защищает от негативных карт. Уходит в сброс вместе с владельцем.',
+    attach: { match: {}, blocks: ['replace', 'attach'] },
+  },
+  {
     name: 'Шум',
     icon: '📢',
     arrow: 'up',
@@ -212,6 +218,13 @@ const cards = [
     activate: [{ op: 'discardTarget', filter: {}, zone: 'both' }],
   },
   {
+    name: 'Пронести алкашку',
+    icon: '🍶',
+    description: 'Старшекур теперь сбрасывает выбранную карту за 1⚡ (вместо сброса себя)',
+    vp: 1,
+    effects: [{ op: 'modifyActivate', match: { name: 'Старшекур' }, cost: 'energy', energycost: 1 }],
+  },
+  {
     name: 'Массовый перекур',
     icon: '🚬',
     description: '🔄 Посмотри столько карт с верха колоды, сколько людей в игре, а затем положи в удобном порядке обратно',
@@ -224,6 +237,15 @@ const cards = [
     description: '❗️ Открой 3 верхние карты колоды и бесплатно разыграй каждую (Угроза → Угроза, остальное → Дом). Эффекты применяются последовательно',
     discardValue: 0,
     effects: [{ when: 'enter', op: 'revealAndPlay', count: 3 }],
+  },
+  {
+    name: 'Хит!',
+    icon: '🥊',
+    description: '🥊 Сбросить за 0⚡. Или взять в Дом бесплатно (2 ПО), но если наверху колоды Угроза — мгновенный проигрыш.',
+    vp: 2,
+    discardValue: 0,
+    effects: [{ op: 'buyFreeIf', match: { name: 'Хит!' } }],
+    loseIf: { nextIsThreat: true },
   },
   {
     name: 'Большая вечеринка',
@@ -245,6 +267,14 @@ const cards = [
     icon: '📖',
     description: '⚡ Каждая сброшенная Угроза или авто-карта уходит под эту карту. В конце +1 ПО за каждую карту под ней.',
     effects: [{ op: 'scorePerTucked', amount: 1 }],
+  },
+  {
+    name: 'Договориться',
+    icon: '🤝',
+    description: '❗️ Сбросьте угрозу или автокарту на выбор',
+    effects: [
+      { when: 'enter', op: 'discardTarget', zone: 'both', filter: { arrow: { $in: ['up', 'down'] } } },
+    ],
   },
 ];
 

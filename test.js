@@ -808,6 +808,102 @@ test('D9e: costType energy — Шура остаётся в Доме и трат
   assert.equal(s.energy, 3, 'тратит 1⚡');
 });
 
+// ---- AL. Пронести алкашку (modifyActivate) -------------------------------
+
+test('AL1: Пронести алкашку оверрайдит стоимость Старшекура: 1⚡ вместо сброса', () => {
+  // Старшекур + Пронести алкашку + Шум (Угроза). Энергии 1, хватает на 1⚡.
+  const g = createGame({ deck: [] });
+  g.home = [cloneCard(byName['Старшекур']), cloneCard(byName['Пронести алкашку'])];
+  g.threat = [cloneCard(byName['Шум'])];
+  g.energy = 1;
+  const after = activate(g, 'Старшекур');
+  const s = getState(after);
+  assert.equal(s.energy, 0, 'потрачено 1⚡');
+  assert.ok(s.home.some((c) => c.name === 'Старшекур'), 'Старшекур остался в Доме');
+  assert.equal(s.discard.some((c) => c.name === 'Старшекур'), false, 'Старшекур НЕ ушёл в сброс');
+  assert.equal(s.threat.some((c) => c.name === 'Шум'), false, 'Шум сброшен');
+  assert.ok(s.discard.some((c) => c.name === 'Шум'), 'Шум в сбросе');
+});
+
+test('AL2: без Пронести алкашку Старшекур тратится сам (discard) — регресс', () => {
+  const g = createGame({ deck: [] });
+  g.home = [cloneCard(byName['Старшекур'])];
+  g.threat = [cloneCard(byName['Шум'])];
+  g.energy = 5;
+  const after = activate(g, 'Старшекур');
+  const s = getState(after);
+  assert.equal(s.energy, 5, 'энергия не тронута (discard)');
+  assert.equal(s.home.some((c) => c.name === 'Старшекур'), false, 'Старшекур ушёл из Дома');
+  assert.ok(s.discard.some((c) => c.name === 'Старшекур'), 'Старшекур в сбросе');
+  assert.equal(s.threat.some((c) => c.name === 'Шум'), false, 'Шум сброшен');
+});
+
+test('AL3: Пронести алкашку — энергии 0, активация no-op', () => {
+  const g = createGame({ deck: [] });
+  g.home = [cloneCard(byName['Старшекур']), cloneCard(byName['Пронести алкашку'])];
+  g.threat = [cloneCard(byName['Шум'])];
+  g.energy = 0;
+  const after = activate(g, 'Старшекур');
+  assert.equal(after, g, 'engine возвращает тот же game (no-op)');
+  const s = getState(after);
+  assert.ok(s.home.some((c) => c.name === 'Старшекур'), 'Старшекур остался');
+  assert.equal(s.threat.some((c) => c.name === 'Шум'), true, 'Шум не сброшен');
+});
+
+test('AL4: Пронести алкашку сама даёт +1 ПО за себя', () => {
+  const g = createGame({ deck: [] });
+  g.home = [cloneCard(byName['Пронести алкашку'])];
+  g.energy = 0;
+  assert.equal(getScore(g), 1, 'ПО базы 1');
+});
+
+test('AL5: Пронести алкашку без Старшекура в игре — просто лежит как +1 ПО', () => {
+  const g = createGame({ deck: [] });
+  g.home = [cloneCard(byName['Пронести алкашку']), cloneCard(byName['Ваня'])];
+  g.energy = 0;
+  assert.equal(getScore(g), 2, 'Ваня(1) + Пронести алкашку(1)');
+});
+
+test('AL6: Пронести алкашку баффает Старшекура и в Зоне Угрозы', () => {
+  const g = createGame({ deck: [] });
+  g.home = [cloneCard(byName['Пронести алкашку'])];
+  g.threat = [cloneCard(byName['Старшекур']), cloneCard(byName['Шум'])];
+  g.energy = 1;
+  const after = activate(g, 'Старшекур');
+  const s = getState(after);
+  assert.equal(s.energy, 0, 'потрачено 1⚡ из Угрозы тоже');
+  assert.ok(s.threat.some((c) => c.name === 'Старшекур'), 'Старшекур остался в Угрозе');
+  assert.equal(s.threat.some((c) => c.name === 'Шум'), false, 'Шум сброшен');
+});
+
+test('AL7: две Пронести алкашку — последняя в inPlay перебивает (детерминированно)', () => {
+  const g = createGame({ deck: [] });
+  g.home = [
+    cloneCard(byName['Старшекур']),
+    cloneCard(byName['Пронести алкашку']),
+    cloneCard(byName['Пронести алкашку']),
+  ];
+  g.threat = [cloneCard(byName['Шум'])];
+  g.energy = 1;
+  const after = activate(g, 'Старшекур');
+  assert.equal(getState(after).energy, 0, 'стоимость всё равно 1⚡ (последний модификатор тот же)');
+  assert.equal(getState(after).home.filter((c) => c.name === 'Пронести алкашку').length, 2, 'обе остались в Доме');
+});
+
+test('AL8: валидация — modifyActivate без cost бросает', () => {
+  assert.throws(
+    () => validateCards([{ name: 'X', effects: [{ op: 'modifyActivate', match: { name: 'Старшекур' }, energycost: 1 }] }]),
+    /modifyActivate\.cost/
+  );
+});
+
+test('AL9: валидация — modifyActivate с energycost < 0 бросает', () => {
+  assert.throws(
+    () => validateCards([{ name: 'X', effects: [{ op: 'modifyActivate', match: { name: 'Старшекур' }, cost: 'energy', energycost: -1 }] }]),
+    /modifyActivate\.energycost/
+  );
+});
+
 // ---- E. Инварианты -------------------------------------------------------
 
 function topLevelCards(game) {
@@ -1257,6 +1353,61 @@ const GOLDEN = [
     },
     expect: () => { assert.ok(true); },
   },
+  {
+    id: 'Договориться(enter): сбрасывает выбранную Угрозу', card: 'Договориться',
+    order: ['Плов', 'Ваня', 'Шум', 'Договориться'], choose: 'Плов',
+    run: (g) => {
+      g = takeTurn(g, 'buy');
+      return g;
+    },
+    expect: (g) => {
+      const s = getState(g);
+      assert.equal(s.threat.find((c) => c.name === 'Шум'), undefined, 'Шум ушёл из угроз');
+      assert.ok(s.discard.some((c) => c.name === 'Шум'), 'Шум в сбросе');
+      assert.ok(s.home.some((c) => c.name === 'Договориться'), 'Договориться осталась в Доме');
+    },
+  },
+  {
+    id: 'Договориться(enter): сбрасывает выбранную авто-карту', card: 'Договориться',
+    order: ['Плов', 'Ваня', 'Паша: бухой', 'Договориться'], choose: 'Плов',
+    run: (g) => {
+      g = takeTurn(g, 'buy');
+      return g;
+    },
+    expect: (g) => {
+      const s = getState(g);
+      assert.equal(s.home.find((c) => c.name === 'Паша: бухой'), undefined, 'авто-карта ушла из Дома');
+      assert.ok(s.discard.some((c) => c.name === 'Паша: бухой'), 'авто-карта в сбросе');
+      assert.ok(s.home.some((c) => c.name === 'Договориться'), 'Договориться осталась в Доме');
+    },
+  },
+  {
+    id: 'Договориться(enter): пустой пул — noop, карта в Доме', card: 'Договориться',
+    order: ['Байки', 'Ваня', 'Паша', 'Договориться'], choose: 'Байки',
+    run: (g) => {
+      g = takeTurn(g, 'buy');
+      return g;
+    },
+    expect: (g) => {
+      const s = getState(g);
+      assert.ok(s.home.some((c) => c.name === 'Договориться'), 'Договориться в Доме');
+      assert.equal(getScore(g), 0, 'ПО не появилось');
+    },
+  },
+  {
+    id: 'Договориться(enter): Обход не сбрасывается', card: 'Договориться',
+    order: ['Байки', 'Ваня', 'Паша', 'Обход', 'Договориться'], choose: 'Байки',
+    run: (g) => {
+      g = takeTurn(g);
+      g = takeTurn(g, 'buy');
+      return g;
+    },
+    expect: (g) => {
+      const s = getState(g);
+      assert.ok(s.threat.some((c) => c.name === 'Обход'), 'Обход остаётся в угрозе');
+      assert.equal(s.discard.some((c) => c.name === 'Обход'), false, 'Обход не в сбросе');
+    },
+  },
 ];
 
 for (const sc of GOLDEN) {
@@ -1587,4 +1738,184 @@ test('R6: discardWith синтетика — consumed попадает в pendin
   assert.equal(tc.state.pendingEvents.length, 0);
   assert.ok(tc.state.game.discard.some((c) => c.name === 'Стол'));
   assert.ok(tc.state.game.discard.some((c) => c.name === 'Стол-цель'));
+});
+
+test('X1: Хит! — buy при угрозе наверху → мгновенный проигрыш, deathReveal event', () => {
+  // Хит! вскрывается, deck[0]=Шум — смерть.
+  const g = createGame({ deck: [cloneCard(byName['Шум']), cloneCard(byName['Конфликт'])], rng: () => 0.5 });
+  g.deck.unshift(cloneCard(byName['Хит!']));
+  g.energy = 0;
+  g.turnPhase = 'idle';
+  let game = takeTurn(g, 'buy');
+  assert.equal(game.status, 'lost');
+  assert.equal(getScore(game), 0);
+  const dr = (game.pendingEvents || []).find((e) => e.type === 'deathReveal');
+  assert.ok(dr, 'должен быть deathReveal event');
+  assert.equal(dr.card.name, 'Шум', 'deathReveal раскрывает именно следующую угрозу');
+  assert.equal(dr.source.name, 'Хит!');
+});
+
+test('X2: Хит! — buy при персоне наверху → Хит! в Доме, игра продолжается', () => {
+  // Хит! вскрывается, deck[0]=Ваня (person, arrow down) — безопасно.
+  const g = createGame({ deck: [cloneCard(byName['Ваня']), cloneCard(byName['Конфликт'])], rng: () => 0.5 });
+  g.deck.unshift(cloneCard(byName['Хит!']));
+  g.energy = 0;
+  g.turnPhase = 'idle';
+  const before = getScore(g);
+  let game = takeTurn(g, 'buy');
+  assert.equal(game.status, 'playing');
+  assert.ok(game.home.some((c) => c.name === 'Хит!'), 'Хит! должен быть в Доме');
+  assert.equal(getScore(game), before + 2, 'vp:2 прибавляется');
+  const dr = (game.pendingEvents || []).find((e) => e.type === 'deathReveal');
+  assert.equal(dr, undefined, 'нет deathReveal');
+});
+
+test('X3: Хит! — buy при нейтральной карте наверху → Хит! в Доме, игра продолжается', () => {
+  // Хит! вскрывается, deck[0]=Плов (нейтральная) — безопасно.
+  const g = createGame({ deck: [cloneCard(byName['Плов']), cloneCard(byName['Конфликт'])], rng: () => 0.5 });
+  g.deck.unshift(cloneCard(byName['Хит!']));
+  g.energy = 0;
+  g.turnPhase = 'idle';
+  let game = takeTurn(g, 'buy');
+  assert.equal(game.status, 'playing');
+  assert.ok(game.home.some((c) => c.name === 'Хит!'), 'Хит! должен быть в Доме');
+  const dr = (game.pendingEvents || []).find((e) => e.type === 'deathReveal');
+  assert.equal(dr, undefined, 'нет deathReveal при нейтральной сверху');
+});
+
+test('X4: Хит! — buy при пустой колоде → Хит! в Доме, игра продолжается или победа', () => {
+  const g = createGame({ deck: [], rng: () => 0.5 });
+  g.deck.unshift(cloneCard(byName['Хит!']));
+  g.energy = 0;
+  g.turnPhase = 'idle';
+  let game = takeTurn(g, 'buy');
+  assert.notEqual(game.status, 'lost', 'не проигрыш при пустой колоде');
+  assert.ok(game.home.some((c) => c.name === 'Хит!'), 'Хит! должен быть в Доме');
+  const dr = (game.pendingEvents || []).find((e) => e.type === 'deathReveal');
+  assert.equal(dr, undefined, 'нет deathReveal при пустой колоде');
+});
+
+test('X5: Хит! — discard → 0⚡, в сбросе, нет deathReveal', () => {
+  const g = createGame({ deck: [cloneCard(byName['Шум'])], rng: () => 0.5 });
+  g.deck.unshift(cloneCard(byName['Хит!']));
+  g.energy = 0;
+  g.turnPhase = 'idle';
+  const energyBefore = g.energy;
+  let game = takeTurn(g, 'discard');
+  assert.equal(game.energy, energyBefore, 'discardValue:0 → энергия не меняется');
+  assert.ok(game.discard.some((c) => c.name === 'Хит!'), 'Хит! в сбросе');
+  assert.equal(game.home.some((c) => c.name === 'Хит!'), false, 'Хит! не в Доме');
+  const dr = (game.pendingEvents || []).find((e) => e.type === 'deathReveal');
+  assert.equal(dr, undefined, 'discard не вызывает deathReveal');
+  assert.equal(game.status, 'playing');
+});
+
+test('X6: Хит! — карта проходит validateCards (нет throw при загрузке)', () => {
+  assert.ok(cards.some((c) => c.name === 'Хит!'), 'Хит! присутствует в cards');
+  const hit = cards.find((c) => c.name === 'Хит!');
+  assert.equal(hit.vp, 2);
+  assert.equal(hit.discardValue, 0);
+  assert.deepEqual(hit.loseIf, { nextIsThreat: true });
+  assert.ok(hit.effects.some((e) => e.op === 'buyFreeIf'));
+  validateCards([hit]);
+});
+
+test('X7: Хит! — buildDeck содержит ровно 1 копию', () => {
+  const deck = buildDeck();
+  const count = deck.filter((c) => c.name === 'Хит!').length;
+  assert.equal(count, 1, 'ровно 1 копия Хит! в колоде');
+});
+
+// ---- R. Внимание (нейтральный аттач-защита) -------------------------------
+
+test('R1: Внимание защищает Шуру от замены Шура:бухой (трезвый остаётся, бухой в сброс, энергия возвращена)', () => {
+  const g = createGame({
+    deck: [cloneCard(byName['Шура: бухой'])],
+    choose: (opts) => opts[0],
+  });
+  g.home = [cloneCard(byName['Шура'])];
+  g.home[0].attached = [cloneCard(byName['Внимание'])];
+  g.home[0].attached[0].attachedTo = 'Шура';
+  g.energy = 2;
+  const after = takeTurn(g, 'buy');
+  const s = getState(after);
+  const shura = s.home.find((c) => c.name === 'Шура');
+  const attention = shura && shura.attached && shura.attached.find((a) => a.name === 'Внимание');
+  assert.ok(shura, 'Шура трезвый остаётся в Доме');
+  assert.ok(attention, 'Внимание висит под Шурой');
+  assert.ok(!s.home.some((c) => c.name === 'Шура: бухой'), 'Шура: бухой не в Доме');
+  assert.ok(s.discard.some((c) => c.name === 'Шура: бухой'), 'Шура: бухой ушёл в сброс');
+  assert.equal(s.energy, 2, 'энергия возвращена: покупка поглощена защитой');
+});
+
+test('R2: Внимание защищает самого левого — Кровать ложится на следующего', () => {
+  const g = createGame({
+    deck: [cloneCard(byName['Кровать'])],
+    choose: (opts) => opts[0],
+  });
+  g.home = [cloneCard(byName['Ваня']), cloneCard(byName['Оля'])];
+  g.home[0].attached = [cloneCard(byName['Внимание'])];
+  g.home[0].attached[0].attachedTo = 'Ваня';
+  g.energy = 2;
+  const after = takeTurn(g, 'buy');
+  const s = getState(after);
+  const vanya = s.home.find((c) => c.name === 'Ваня');
+  const olya = s.home.find((c) => c.name === 'Оля');
+  assert.ok(vanya, 'Ваня остаётся');
+  assert.equal(vanya.asleep, false, 'Ваня не спит (защищён Вниманием)');
+  assert.ok(olya, 'Оля остаётся');
+  assert.equal(olya.asleep, true, 'Оля спит (Кровать пропустила защищённого Ваню)');
+  assert.ok(olya.attached && olya.attached.some((a) => a.name === 'Кровать'),
+    'Кровать лежит под Олей');
+  assert.ok(!s.discard.some((c) => c.name === 'Кровать'), 'Кровать не в сбросе');
+});
+
+test('R3: если все люди в Доме защищены — Кровать уходит в сброс', () => {
+  const g = createGame({
+    deck: [cloneCard(byName['Кровать'])],
+    choose: (opts) => opts[0],
+  });
+  g.home = [cloneCard(byName['Ваня']), cloneCard(byName['Оля'])];
+  g.home[0].attached = [cloneCard(byName['Внимание'])];
+  g.home[0].attached[0].attachedTo = 'Ваня';
+  g.home[1].attached = [cloneCard(byName['Внимание'])];
+  g.home[1].attached[0].attachedTo = 'Оля';
+  g.energy = 2;
+  const after = takeTurn(g, 'buy');
+  const s = getState(after);
+  assert.ok(s.discard.some((c) => c.name === 'Кровать'), 'Кровать в сбросе (некуда положить)');
+  const vanya = s.home.find((c) => c.name === 'Ваня');
+  const olya = s.home.find((c) => c.name === 'Оля');
+  assert.equal(vanya.asleep, false, 'Ваня не спит');
+  assert.equal(olya.asleep, false, 'Оля не спит');
+});
+
+test('R4: Внимание само по себе проходит validateCards (нет throw при загрузке)', () => {
+  const vnim = cards.find((c) => c.name === 'Внимание');
+  assert.ok(vnim, 'карта Внимание определена');
+  assert.deepEqual(vnim.attach, { match: {}, blocks: ['replace', 'attach'] });
+  assert.equal(vnim.vp, undefined, 'без ПО');
+  validateCards([vnim]);
+});
+
+test('R5: Внимание в buildDeck — ровно 1 копия', () => {
+  const deck = buildDeck();
+  const count = deck.filter((c) => c.name === 'Внимание').length;
+  assert.equal(count, 1, 'ровно 1 копия Внимания в колоде');
+});
+
+test('R6: блокировка replace без Внимания — старая логика не сломана (Шура заменяет Шура:бухой)', () => {
+  const g = createGame({
+    deck: [cloneCard(byName['Шура'])],
+    choose: (opts) => opts[0],
+  });
+  g.home = [cloneCard(byName['Шура: бухой'])];
+  g.energy = 2;
+  const after = takeTurn(g, 'buy');
+  const s = getState(after);
+  const shura = s.home.find((c) => c.name === 'Шура');
+  const drunk = s.home.find((c) => c.name === 'Шура: бухой');
+  assert.ok(!drunk, 'Шура: бухой ушёл (заменён)');
+  assert.ok(shura, 'Шура трезвый занял место');
+  assert.equal(s.energy, 0, 'энергия потрачена (покупка состоялась, защиты не было)');
 });

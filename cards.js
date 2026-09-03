@@ -222,15 +222,30 @@ const cards = [
   {
     name: 'Тост',
     icon: '🥂',
-    description: 'Получи дополнительные 1 ПО, если День рождения! в игре',
-    vp: 1,
-    effects: [{ op: 'bonusVp', amount: 1, if: { name: 'День рождения!' } }],
+    description: '❗️ Открой 3 верхние карты колоды и бесплатно разыграй каждую (Угроза → Угроза, остальное → Дом). Эффекты применяются последовательно',
+    discardValue: 0,
+    effects: [{ when: 'enter', op: 'revealAndPlay', count: 3 }],
   },
   {
     name: 'Большая вечеринка',
     icon: '🎉',
     description: 'В конце игры получи 1 ПО за каждого человека в игре',
     effects: [{ op: 'scorePerPerson', amount: 1 }],
+  },
+  {
+    name: 'Уютная вечеринка',
+    icon: '🛋️',
+    description: '2 ПО, если в Доме нет Угроз. Если есть — −1 ПО за каждую Угрозу.',
+    effects: [
+      { op: 'bonusVp', amount: 2, if: { threatsCount: 0 } },
+      { op: 'scorePerThreat', amount: -1 },
+    ],
+  },
+  {
+    name: 'Байки',
+    icon: '📖',
+    description: '⚡ Каждая сброшенная Угроза или авто-карта уходит под эту карту. В конце +1 ПО за каждую карту под ней.',
+    effects: [{ op: 'scorePerTucked', amount: 1 }],
   },
 ];
 

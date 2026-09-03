@@ -16,7 +16,31 @@
       canBuy: false,
       activatable: new Set(),
       game: null,
+      pendingEvents: [], // универсальная очередь анимаций (engine pendingEvents → UI)
     };
+
+    // Проигрывает очередь событий последовательно (универсально для любой карты, не только Тост)
+    async function drainEvents(animator) {
+      while (state.pendingEvents.length) {
+        const ev = state.pendingEvents.shift();
+        if (ev.type === 'place') {
+          if (ev.zone === 'threat') log('Угроза: ' + ev.card.name);
+          else if (ev.zone === 'home') {
+            if (ev.via === 'revealAndPlay') log('❗️ Тост → ' + ev.card.name + ' → Дом');
+            else log(ev.card.name + ' → Дом');
+          }
+        } else if (ev.type === 'discard') {
+          const gain = ev.gain ? ' (+1⚡)' : ' (0⚡)';
+          log('Сброс: ' + ev.card.name + gain);
+        } else if (ev.type === 'intercepted') {
+          log('🤚 ' + ev.card.name + ' перехвачена' + (ev.owner ? ' (' + ev.owner + ')' : ''));
+        } else if (ev.type === 'consumed') {
+          log('❗️ ' + ev.card.name + ' сброшена взаимно');
+        }
+        if (animator) await animator(ev);
+        render();
+      }
+    }
 
     function collectActivatable() {
       return [...state.game.home, ...state.game.threat]
@@ -27,8 +51,10 @@
     function logResolve(card, action) {
       if (card.arrow === 'up') log('Угроза: ' + card.name);
       else if (card.arrow === 'down') log(card.name + ' → Дом');
-      else if (action === 'discard') log('Сброс: ' + card.name + ' (+1⚡)');
-      else {
+      else if (action === 'discard') {
+        const v = card.discardValue === 0 ? 0 : 1;
+        log('Сброс: ' + card.name + (v ? ' (+1⚡)' : ' (0⚡)'));
+      } else {
         const lbl = getBuyLabel(state.game, card);
         log((lbl.free ? 'Куплено (бесплатно): ' : 'Куплено: ') + card.name + (lbl.free ? '' : ` (−${lbl.cost}⚡)`));
       }
@@ -120,7 +146,9 @@
       }
       state.game = resolveTop(state.game, action);
       state.game.choose = (opts) => opts[0];
-      logResolve(state.topCard, action);
+      // универсальная очередь: engine.pendingEvents → turnController.pendingEvents
+      state.pendingEvents = [...(state.game.pendingEvents || [])];
+      state.game.pendingEvents = [];
       state.phase = 'transition';
       render();
       if (state.game.status !== 'playing') { state.phase = 'gameover'; render(); return true; }
@@ -200,7 +228,7 @@
       render();
     }
 
-    return { state, newSession, choosePrep, startTurn, take, assess, decide, activate };
+    return { state, newSession, choosePrep, startTurn, take, assess, decide, activate, drainEvents };
   }
 
   globalThis.Convivium.createTurnController = createTurnController;

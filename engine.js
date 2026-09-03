@@ -31,7 +31,7 @@ const OP_REGISTRY = {
       if (idx >= 0) {
         const [target] = zone.splice(idx, 1);
         detachAttachments(game, target);
-        game.discard.push(target);
+        pushDiscard(game, target);
         // источник занимает слот удалённой цели -> порядок зоны сохраняется
         const srcIdx = zone.indexOf(source);
         if (srcIdx >= 0 && srcIdx !== idx) {
@@ -65,8 +65,8 @@ const OP_REGISTRY = {
       if (source.accumulated.length >= e.max) {
         detachAttachments(game, source);
         removeCard(game, source);
-        game.discard.push(source);
-        for (const a of source.accumulated) game.discard.push(a);
+        pushDiscard(game, source);
+        for (const a of source.accumulated) pushDiscard(game, a);
         source.accumulated = [];
       }
     },
@@ -88,7 +88,7 @@ const OP_REGISTRY = {
           : e.zone === 'home' ? [game.home]
           : [game.threat];
         for (const z of zones) removeFromZone(z, chosen);
-        game.discard.push(chosen);
+        pushDiscard(game, chosen);
       }
     },
   },
@@ -128,6 +128,51 @@ const OP_REGISTRY = {
       const cb = (typeof game.reorder === 'function') ? game.reorder(top) : top;
       const ordered = (Array.isArray(cb) && cb.length === top.length) ? cb : top;
       game.deck.unshift(...ordered);
+    },
+  },
+  revealAndPlay: {
+    kind: 'action', when: 'enter', phaseable: true,
+    validate(e, where) {
+      if (typeof e.count !== 'number' || !Number.isInteger(e.count) || e.count < 1) throw new Error(`${where}: revealAndPlay.count positive integer`);
+    },
+    run(game, source, e) {
+      if (game.__inRevealAndPlay) return; // Q6: без рекурсии второго Тоста
+      game.__inRevealAndPlay = true;
+      try {
+        const n = Math.min(e.count, game.deck.length);
+        for (let i = 0; i < n; i++) {
+          if (game.status !== 'playing') break;
+          const raw = game.deck.shift();
+          if (!raw) break;
+          const c = cloneCard(raw);
+          const outcome = applyRevealPreEffects(game, c);
+          if (outcome === 'consumed') {
+            emit(game, { type: 'consumed', card: cloneCard(c) });
+          } else if (outcome === 'intercepted') {
+            const owner = [...game.home, ...game.threat].find(o => o.attached && o.attached.some(a => a.name === c.name));
+            emit(game, { type: 'intercepted', card: cloneCard(c), owner: owner ? owner.name : null });
+          } else if (c.arrow === 'up') {
+            game.threat.push(c);
+            emit(game, { type: 'place', card: cloneCard(c), zone: 'threat', via: 'revealAndPlay' });
+            runEnterActions(game, c);
+          } else if (c.arrow === 'down') {
+            game.home.push(c);
+            emit(game, { type: 'place', card: cloneCard(c), zone: 'home', via: 'revealAndPlay' });
+            runEnterActions(game, c);
+          } else {
+            game.home.push(c);
+            emit(game, { type: 'place', card: cloneCard(c), zone: 'home', via: 'revealAndPlay' });
+            runEnterActions(game, c);
+          }
+          applyRevealPostEffects(game, c);
+          game.status = deriveStatus(game);
+          if (game.status !== 'playing') break;
+          checkAttachInvariant(game);
+          checkPlaceInvariant(game);
+        }
+      } finally {
+        delete game.__inRevealAndPlay;
+      }
     },
   },
   modifyVp: {
@@ -182,6 +227,19 @@ const OP_REGISTRY = {
       validateMatch(e.match, where + '.scorePerAttached');
     },
   },
+  scorePerThreat: {
+    kind: 'derive', phaseable: false,
+    validate(e, where) {
+      if (typeof e.amount !== 'number') throw new Error(`${where}: scorePerThreat.amount number`);
+      validateCond(e.if, where + '.scorePerThreat.if');
+    },
+  },
+  scorePerTucked: {
+    kind: 'derive', phaseable: false,
+    validate(e, where) {
+      if (typeof e.amount !== 'number') throw new Error(`${where}: scorePerTucked.amount number`);
+    },
+  },
   discardWith: {
     kind: 'action', when: undefined, phaseable: false, reveal: true, self: true,
     validate(e, where) {
@@ -196,8 +254,8 @@ const OP_REGISTRY = {
       const zone = e.in === 'threat' ? g.threat : g.home;
       detachAttachments(g, t);
       removeFromZone(zone, t);
-      g.discard.push(t);
-      g.discard.push(source);
+      pushDiscard(g, t);
+      pushDiscard(g, source);
       return true;
     },
   },
@@ -265,10 +323,20 @@ function validateCond(c, where) {
   if (c === undefined) return;
   if (typeof c !== 'object' || c === null) throw new Error(`${where}: cond object`);
   for (const k of Object.keys(c)) {
-    if (!['name', 'tags'].includes(k)) throw new Error(`${where}: unknown cond key ${k}`);
+    if (!['name', 'tags', 'threatsCount'].includes(k)) throw new Error(`${where}: unknown cond key ${k}`);
   }
   if (c.name !== undefined && typeof c.name !== 'string') throw new Error(`${where}: cond.name string`);
   if (c.tags !== undefined) validateTags(c.tags, `${where}: cond.tags`);
+  if (c.threatsCount !== undefined) {
+    if (typeof c.threatsCount === 'number') {
+      if (!Number.isInteger(c.threatsCount) || c.threatsCount < 0) throw new Error(`${where}: cond.threatsCount non-negative integer`);
+    } else if (typeof c.threatsCount === 'object' && c.threatsCount !== null) {
+      for (const kk of Object.keys(c.threatsCount)) {
+        if (!['gte', 'lte', 'gt', 'lt', 'eq'].includes(kk)) throw new Error(`${where}: unknown cond.threatsCount key ${kk}`);
+        if (typeof c.threatsCount[kk] !== 'number' || !Number.isInteger(c.threatsCount[kk]) || c.threatsCount[kk] < 0) throw new Error(`${where}: cond.threatsCount.${kk} non-negative integer`);
+      }
+    } else throw new Error(`${where}: cond.threatsCount number|object`);
+  }
 }
 
 function validateEffect(e, where, inActivate) {
@@ -326,6 +394,7 @@ function validateCard(c, idx) {
     if (!Array.isArray(c.effects)) throw new Error(`${where}: effects array`);
     c.effects.forEach((e, i) => validateEffect(e, `${where}.effects[${i}]`, false));
   }
+  if (c.discardValue !== undefined && typeof c.discardValue !== 'number') throw new Error(`${where}: discardValue number`);
   if (c.activate !== undefined) {
     if (!Array.isArray(c.activate)) throw new Error(`${where}: activate array`);
     c.activate.forEach((e, i) => {
@@ -356,6 +425,28 @@ function isThreat(c) {
 }
 function isPerson(c) {
   return !!(c.tags && (c.tags.includes('man') || c.tags.includes('woman')));
+}
+function getRawThreatCount(game) {
+  // Прямой подсчёт без вызова deriveSnapshot — avoids recursion when conditionMet зовётся внутри deriveSnapshot.
+  let total = 0;
+  const asleep = deriveAsleepSet(game);
+  const inPlay = inPlayCards(game);
+  for (const c of game.threat) {
+    if (!isThreat(c)) continue;
+    let w = 1;
+    for (const card of inPlay) {
+      if (asleep.has(card)) continue;
+      if (card.threatWeight && matches(game, c, card.threatWeight.match)) { w = card.threatWeight.weight; break; }
+    }
+    for (const card of inPlay) {
+      if (asleep.has(card)) continue;
+      for (const e of card.effects || []) {
+        if (e.op === 'threatWeightSet' && matches(game, c, e.match)) { w = e.value; }
+      }
+    }
+    total += w;
+  }
+  return total;
 }
 // Возвращает список карт-перехватчиков (владельцев) для входящей карты.
 // По умолчанию (без match) перехватывает только настоящие угрозы (isThreat)
@@ -401,6 +492,17 @@ function matches(game, card, match, zone) {
 }
 function conditionMet(game, cond) {
   if (!cond) return true;
+  if (cond.threatsCount !== undefined) {
+    const n = getRawThreatCount(game);
+    if (typeof cond.threatsCount === 'number') return n === cond.threatsCount;
+    const v = cond.threatsCount;
+    if (v.eq !== undefined && n !== v.eq) return false;
+    if (v.gte !== undefined && n < v.gte) return false;
+    if (v.lte !== undefined && n > v.lte) return false;
+    if (v.gt !== undefined && n <= v.gt) return false;
+    if (v.lt !== undefined && n >= v.lt) return false;
+    return true;
+  }
   const asleep = deriveAsleepSet(game);
   const inPlay = inPlayCards(game).filter((c) => !asleep.has(c));
   if (cond.name) return inPlay.some((c) => c.name === cond.name);
@@ -439,6 +541,36 @@ function getDiscardTargetPool(game, source, filter, zone) {
   return pool;
 }
 
+function isTuckable(card) {
+  return isThreat(card) || card.arrow === 'down';
+}
+function findTuckOwner(game) {
+  const asleep = deriveAsleepSet(game);
+  for (const c of inPlayCards(game)) {
+    if (c.name !== 'Байки') continue;
+    if (asleep.has(c)) continue;
+    return c;
+  }
+  return null;
+}
+function pushDiscard(game, card) {
+  const owner = findTuckOwner(game);
+  if (owner && isTuckable(card)) {
+    owner.tucked = owner.tucked || [];
+    owner.tucked.push(card);
+    emit(game, { type: 'tucked', card: cloneCard(card), owner: owner.name });
+    return;
+  }
+  game.discard.push(card);
+}
+function detachTucked(game, card) {
+  if (!card.tucked || card.tucked.length === 0) return;
+  for (const a of card.tucked) {
+    game.discard.push(a);
+  }
+  card.tucked = [];
+}
+
 function getBuyLabel(game, card) {
   const free = isBuyFree(game, card);
   if (free) return { free: true, text: '0⚡', cls: 'pos' };
@@ -460,11 +592,17 @@ function cloneCard(card) {
   if (card.attach) c.attach = { ...card.attach };
   if (card.attached) c.attached = card.attached.map(cloneCard);
   if (card.accumulated) c.accumulated = card.accumulated.map(cloneCard);
+  if (card.tucked) c.tucked = card.tucked.map(cloneCard);
   return c;
 }
 
+function emit(game, ev) {
+  game.pendingEvents = game.pendingEvents || [];
+  game.pendingEvents.push(ev);
+}
+
 function cloneGame(g) {
-  return {
+  const ng = {
     deck: g.deck.map(cloneCard),
     home: g.home.map(cloneCard),
     threat: g.threat.map(cloneCard),
@@ -476,7 +614,10 @@ function cloneGame(g) {
     choose: g.choose,
     rng: g.rng,
     reorder: g.reorder,
+    pendingEvents: g.pendingEvents ? [...g.pendingEvents] : [],
   };
+  if (g.__inRevealAndPlay) ng.__inRevealAndPlay = g.__inRevealAndPlay;
+  return ng;
 }
 
 // --- состояние -------------------------------------------------------------
@@ -493,6 +634,7 @@ function createGame({ deck, choose, rng } = {}) {
     log: [],
     choose: choose || ((opts) => opts[0]),
     rng: rng || Math.random,
+    pendingEvents: [],
   };
 }
 
@@ -502,7 +644,7 @@ function setup(game, { choose } = {}) {
   const chosen = choose ? choose(top3) : g.choose(top3);
   const card = cloneCard(chosen);
   g.home.push(card);
-  for (const c of top3) if (c !== chosen) g.discard.push(c);
+  for (const c of top3) if (c !== chosen) pushDiscard(g, c);
   g.energy = 2;
   runEnterActions(g, card); // стартовая карта тоже проигрывает enter-эффекты
   g.status = deriveStatus(g);
@@ -540,6 +682,7 @@ function resolveTop(game, action) {
   if (game.status !== 'playing') return game;
   if (game.turnPhase !== 'turnStarted') throw new Error('phase violation: resolveTop only after runTurnStart');
   const g = cloneGame(game);
+  g.pendingEvents = [];
   if (g.deck.length === 0) {
     g.status = 'won';
     g.turnPhase = 'idle';
@@ -560,12 +703,23 @@ function placeCard(g, card, action) {
   const c = cloneCard(card);
   // Эффекты вскрытия ДО размещения (discardWith / перехват) — единый диспетчер.
   const outcome = applyRevealPreEffects(g, c);
-  if (outcome === 'consumed' || outcome === 'intercepted') return;
+  if (outcome === 'consumed') {
+    emit(g, { type: 'consumed', card: cloneCard(c) });
+    return;
+  }
+  if (outcome === 'intercepted') {
+    // владелец уже получил card в attached внутри applyRevealPreEffects
+    const owner = [...g.home, ...g.threat].find(o => o.attached && o.attached.some(a => a.name === c.name));
+    emit(g, { type: 'intercepted', card: cloneCard(c), owner: owner ? owner.name : null });
+    return;
+  }
   if (c.arrow === 'up') {
     g.threat.push(c);
+    emit(g, { type: 'place', card: cloneCard(c), zone: 'threat' });
     runEnterActions(g, c);
   } else if (c.arrow === 'down') {
     g.home.push(c);
+    emit(g, { type: 'place', card: cloneCard(c), zone: 'home' });
     runEnterActions(g, c);
   } else {
     if (action !== 'buy' && action !== 'discard') throw new Error(`invalid action for neutral card ${c.name}: ${action}`);
@@ -574,10 +728,13 @@ function placeCard(g, card, action) {
     if (action === 'buy' && (free || g.energy >= cost)) {
       g.energy -= free ? 0 : cost;
       g.home.push(c);
+      emit(g, { type: 'place', card: cloneCard(c), zone: 'home', cost: free ? 0 : cost });
       runEnterActions(g, c);
     } else if (action === 'discard') {
-      g.discard.push(c);
-      g.energy += 1;
+      pushDiscard(g, c);
+      const gain = (c.discardValue === 0 ? 0 : 1);
+      g.energy += gain;
+      emit(g, { type: 'discard', card: cloneCard(c), zone: 'discard', gain });
     } else {
       throw new Error(`not enough energy to buy ${c.name}`);
     }
@@ -598,7 +755,7 @@ function applyAttach(g, card) {
   const pool = g.home.filter((c) => c !== card && matches(g, c, card.attach.match));
   if (pool.length === 0) {
     removeFromZone(g.home, card);
-    g.discard.push(card);
+    pushDiscard(g, card);
     return;
   }
   let owner;
@@ -677,6 +834,7 @@ function cloneThreatTemplate(game) {
       present.add(c.name);
       if (c.attached) walk(c.attached);
       if (c.accumulated) walk(c.accumulated);
+      if (c.tucked) walk(c.tucked);
     }
   };
   walk(game.deck); walk(game.home); walk(game.threat); walk(game.discard);
@@ -710,7 +868,7 @@ function activate(game, name) {
     const zone = g.home.includes(live) ? g.home : g.threat;
     detachAttachments(g, live);
     removeFromZone(zone, live);
-    g.discard.push(live);
+    pushDiscard(g, live);
   }
   g.status = deriveStatus(g);
   checkAttachInvariant(g);
@@ -867,10 +1025,12 @@ function deriveSnapshot(game) {
     if (!isThreat(c)) continue;
     let w = 1;
     for (const card of inPlay) {
+      if (asleep.has(card)) continue;
       if (card.threatWeight && matches(game, c, card.threatWeight.match)) { w = card.threatWeight.weight; break; }
     }
     // threatWeightSet перезаписывает вес (Дворик нейтрализует Шум и т.п.)
     for (const card of inPlay) {
+      if (asleep.has(card)) continue;
       for (const e of card.effects || []) {
         if (e.op === 'threatWeightSet' && matches(game, c, e.match)) { w = e.value; }
       }
@@ -878,7 +1038,7 @@ function deriveSnapshot(game) {
     threatRows.push({ card: c, weight: w });
   }
 
-  // итоговый счёт + вклады (один проход scorePerPerson/scorePerAttached)
+  // итоговый счёт + вклады (один проход scorePerPerson/scorePerAttached/scorePerThreat)
   for (const c of inPlay) {
     for (const e of c.effects || []) {
       if (e.op === 'scorePerPerson') {
@@ -900,6 +1060,27 @@ function deriveSnapshot(game) {
           row.push({ label: c.name, value: add });
           bd.set(c, row);
         }
+      } else if (e.op === 'scorePerTucked') {
+        if (asleep.has(c)) {} else {
+          const n = (c.tucked || []).length;
+          const add = e.amount * n;
+          if (add) {
+            vp.set(c, (vp.get(c) || 0) + add);
+            const row = bd.get(c) || [];
+            row.push({ label: c.name, value: add });
+            bd.set(c, row);
+          }
+        }
+      } else if (e.op === 'scorePerThreat') {
+        if (e.if && !conditionMet(game, e.if)) continue;
+        const threatCount = threatRows.reduce((s, r) => s + r.weight, 0);
+        const add = e.amount * threatCount;
+        if (add) {
+          vp.set(c, (vp.get(c) || 0) + add);
+          const row = bd.get(c) || [];
+          row.push({ label: c.name, value: add });
+          bd.set(c, row);
+        }
       }
     }
   }
@@ -915,7 +1096,7 @@ function deriveSnapshot(game) {
 }
 
 function deriveThreatCount(game) {
-  return deriveSnapshot(game).threatRows.reduce((s, r) => s + r.weight, 0);
+  return getRawThreatCount(game);
 }
 
 function deriveThreatBreakdown(game) {
@@ -994,13 +1175,14 @@ function removeCard(game, card) {
 // Аттач-карта не может лежать отдельно: уходит в сброс вместе с владельцем.
 // Если владелец — Кровать (sleep), attached карта «просыпается» и возвращается в home.
 function detachAttachments(game, card) {
+  detachTucked(game, card); // Байки: стопка падает в сброс
   if (!card.attached || card.attached.length === 0) return;
   for (const a of card.attached) {
     delete a.attachedTo;
     if (card.sleep) {
       game.home.push(a);
     } else {
-      game.discard.push(a);
+      pushDiscard(game, a);
     }
   }
   card.attached = [];

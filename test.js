@@ -77,7 +77,7 @@ test('B2: покупка тратит 2 энергии и кладёт в Дом
 });
 
 test('B3: при энергии < 2 покупка недоступна — выбрасывается ошибка', () => {
-  let game = makeGame(['Ваня', 'Оля', 'Денис', 'Тост', 'Комната 402'], 'Ваня');
+  let game = makeGame(['Ваня', 'Оля', 'Денис', 'Большая вечеринка', 'Паша'], 'Ваня');
   game = takeTurn(game, 'buy');
   assert.equal(getState(game).energy, 0);
   assert.throws(() => takeTurn(game, 'buy'), /energy/i);
@@ -111,7 +111,7 @@ test('C1: пустая колода — победа, счёт = сумма ПО
   game = runToEnd(game, 'buy');
   const s = getState(game);
   assert.equal(s.status, 'won');
-  assert.equal(getScore(game), 5);
+  assert.equal(getScore(game), 3); // Ваня1 + День рождения!2, Тост 0 (revealAndPlay) вместо старого 1+1
 });
 
 test('C2: Обход + 3 Угрозы в конце хода — поражение, счёт 0', () => {
@@ -339,6 +339,53 @@ test('D8: Большая вечеринка даёт +1 ПО за каждого
   assert.ok(s.home.find((c) => c.name === 'Большая вечеринка'), 'Большая вечеринка в игре');
   // persons: Ваня + Паша + Вася = 3 => scorePerPerson +3; их ПО: Ваня 1, Паша 0, Вася 0 => 4
   assert.equal(getScore(after), 4);
+});
+
+// ---- T. Тост revealAndPlay (❗️ 3 карты) + discardValue 0 ----------------------
+
+test('T1: Тост при покупке бесплатно разыгрывает 3 карты (нейтральные→Дом, угрозы→Угроза)', () => {
+  let game = makeGame(['Ваня', 'Оля', 'Денис', 'Тост', 'Большая вечеринка', 'Паша', 'Шум'], 'Ваня');
+  game = takeTurn(game, 'buy'); // Тост → Большая вечеринка→Дом, Паша→Дом, Шум→Угроза
+  const s = getState(game);
+  assert.ok(s.home.some((c) => c.name === 'Тост'), 'Тост в Доме');
+  assert.equal(s.home.find((c) => c.name === 'Тост').vpEffective, 0, 'Тост 0VP');
+  assert.ok(s.home.some((c) => c.name === 'Большая вечеринка'), 'Большая вечеринка бесплатно в Доме');
+  assert.ok(s.home.some((c) => c.name === 'Паша'), 'Паша бесплатно в Доме');
+  assert.ok(s.threat.some((c) => c.name === 'Шум'), 'Шум в Угрозе');
+  assert.equal(getState(game).energy, 0, 'Тост стоил 2⚡, каскад бесплатен');
+  assertInvariants(game);
+});
+
+test('T2: Тост при сбросе даёт 0⚡ (discardValue:0)', () => {
+  let game = makeGame(['Ваня', 'Оля', 'Денис', 'Тост'], 'Ваня');
+  const before = getState(game).energy;
+  game = takeTurn(game, 'discard'); // Тост в сброс
+  const s = getState(game);
+  assert.ok(s.discard.some((c) => c.name === 'Тост'), 'Тост в сбросе');
+  assert.equal(s.energy, before, '0⚡ за сброс Тоста (было +1)');
+  assertInvariants(game);
+});
+
+test('T3: Тост разыгрывает сколько есть (<3)', () => {
+  let game = makeGame(['Ваня', 'Оля', 'Денис', 'Тост', 'Большая вечеринка', 'Паша'], 'Ваня');
+  game = takeTurn(game, 'buy'); // Тост → 2 карты (<3), deck опустеет
+  const s = getState(game);
+  assert.ok(s.home.some((c) => c.name === 'Тост'), 'Тост в Доме');
+  assert.ok(s.home.some((c) => c.name === 'Большая вечеринка'), 'Большая вечеринка из каскада в Доме');
+  assert.ok(s.home.some((c) => c.name === 'Паша'), 'Паша из каскада в Доме');
+  assert.equal(s.deck.length, 0, 'колода пуста после каскада');
+  assertInvariants(game);
+});
+
+test('T4: Тост каскад учитывает перехват Дениса и Вова +1⚡', () => {
+  const g = createGame({ deck: [cloneCard(byName['Тост']), cloneCard(byName['Шум']), cloneCard(byName['Большая вечеринка']), cloneCard(byName['Кровать'])] });
+  g.home = [cloneCard(byName['Вова']), cloneCard(byName['Денис'])]; // Денис ловит угрозы/авто, Тост нейтральный — не ловит, Вова даёт +1
+  g.energy = 2;
+  const after = takeTurn(g, 'buy'); // Тост → Шум (перехвачен Денисом) + Большая вечеринка + Кровать
+  const s = getState(after);
+  assert.ok(s.home.find((c) => c.name === 'Денис').attached.some((a) => a.name === 'Шум'), 'Шум перехвачен Денисом в каскаде');
+  assert.equal(s.threat.length, 0, 'Шум не в Угрозе');
+  assertInvariants(after);
 });
 
 // ---- S. Вова (энергия при вскрытии) + Вася (играет место из сброса) ----------
@@ -1084,18 +1131,18 @@ const GOLDEN = [
     },
   },
   {
-    id: 'bonusVp', card: 'Тост',
-    order: ['Ваня', 'Оля', 'Денис', 'День рождения!', 'Тост'], choose: 'Ваня',
-    run: (g) => {
-      while (g.status === 'playing') {
-        const a = getState(g).energy >= 2 ? 'buy' : 'discard';
-        g = takeTurn(g, a);
-      }
-      return g;
-    },
+    id: 'revealAndPlay', card: 'Тост',
+    order: ['Ваня', 'Оля', 'Денис', 'Тост', 'Большая вечеринка', 'Паша', 'Шум', 'Вова'], choose: 'Ваня',
+    run: (g) => takeTurn(g, 'buy'), // Тост в Дом → каскад 3: Большая вечеринка→Дом, Паша→Дом, Шум→Угроза
     expect: (g) => {
       const s = getState(g);
-      assert.equal(s.home.find((c) => c.name === 'Тост').vpEffective, 2);
+      const toast = s.home.find((c) => c.name === 'Тост');
+      assert.ok(toast, 'Тост в Доме');
+      assert.equal(toast.vpEffective, 0, 'Тост 0VP (discardValue 0, no bonus)');
+      assert.ok(s.home.some((c) => c.name === 'Большая вечеринка'), 'Большая вечеринка бесплатно в Доме');
+      assert.ok(s.home.some((c) => c.name === 'Паша'), 'Паша бесплатно в Доме');
+      assert.ok(s.threat.some((c) => c.name === 'Шум'), 'Шум в Угрозе');
+      assert.equal(s.deck.length, 1, 'в колоде остался Вова');
     },
   },
   {

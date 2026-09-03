@@ -513,8 +513,13 @@ async function submitDecision(action) {
   busy = true;
   const card = tc.state.topCard;
   const interceptor = findInterceptor(tc.state.game, card);
-  // универсальная очередь: анимация каскада через drainEvents
   const progressed = await tc.decide(action);
+  if (!progressed) {
+    busy = false;
+    enableDecisionUI(tc.state.topCard);
+    return;
+  }
+  // phase='transition' — рубашка не показывается, анимация идёт на вскрытой карте
   if (tc.state.pendingEvents.length > 0) {
     await tc.drainEvents(async (ev) => {
       const wrap = $('center-card');
@@ -529,36 +534,57 @@ async function submitDecision(action) {
       else if (ev.zone === 'home') dir = 'down';
       else if (ev.zone === 'discard') dir = ev.gain ? 'left' : 'left';
       else dir = flyDirection(ev.card, action);
+      void wrap.offsetWidth;
       wrap.classList.add('fly-' + dir);
       await wait(520);
+      // спрятать до снятия класса — иначе snap-back в центр на мгновение; оставляем DOM для стабильной геометрии #deck-pile
+      wrap.classList.add('hidden');
       wrap.classList.remove('fly-' + dir);
       await wait(80);
       if (ev.type === 'intercepted' && ev.owner) {
-        const ownerEl = $('home-cards').querySelector('[data-name="' + ev.owner + '"]');
+        const owner = ev.owner;
+        // drainEvents делает render после аниматора — подсветку отложим до нового DOM
+        setTimeout(() => {
+          const ownerEl = $('home-cards').querySelector('[data-name="' + owner + '"]');
+          if (ownerEl) {
+            ownerEl.classList.add('intercept-owner');
+            setTimeout(() => ownerEl.classList.remove('intercept-owner'), 900);
+          }
+        }, 60);
+      }
+    });
+    if (tc.state.game.status !== 'playing') {
+      tc.state.phase = 'gameover';
+      render();
+    } else {
+      await tc.startTurn();
+    }
+  } else {
+    // fallback — не должно случаться после унификации pendingEvents
+    const wrap = $('center-card');
+    const dir = (interceptor && !tc.state.instant) ? 'intercept' : flyDirection(card, action);
+    wrap.classList.add('fly-' + dir);
+    await wait(420);
+    wrap.classList.add('hidden');
+    wrap.classList.remove('fly-' + dir);
+    if (interceptor && !tc.state.instant) {
+      const owner = interceptor.name;
+      setTimeout(() => {
+        const ownerEl = $('home-cards').querySelector('[data-name="' + owner + '"]');
         if (ownerEl) {
           ownerEl.classList.add('intercept-owner');
           setTimeout(() => ownerEl.classList.remove('intercept-owner'), 900);
         }
-      }
-    });
-    render();
-  } else {
-    // fallback — не должно случаться после унификации pendingEvents, оставлено для совместимости
-    const dir = (interceptor && !tc.state.instant) ? 'intercept' : flyDirection(card, action);
-    $('center-card').classList.add('fly-' + dir);
-    await wait(420);
-    $('center-card').classList.remove('fly-' + dir);
-    if (interceptor && !tc.state.instant) {
-      const ownerEl = $('home-cards').querySelector('[data-name="' + interceptor.name + '"]');
-      if (ownerEl) {
-        ownerEl.classList.add('intercept-owner');
-        setTimeout(() => ownerEl.classList.remove('intercept-owner'), 900);
-      }
+      }, 60);
     }
-    render();
+    if (tc.state.game.status !== 'playing') {
+      tc.state.phase = 'gameover';
+      render();
+    } else {
+      await tc.startTurn();
+    }
   }
   busy = false;
-  if (!progressed) enableDecisionUI(tc.state.topCard);
 }
 
 // ---------------------------------------------------------------------------

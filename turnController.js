@@ -127,8 +127,6 @@
         state.game.pendingEvents = [];
         state.phase = 'transition';
         render();
-        if (state.game.status !== 'playing') { state.phase = 'gameover'; render(); return true; }
-        await startTurn();
         return true;
       }
       if (action === 'buy' && card.attach && card.attach.choose) {
@@ -152,8 +150,6 @@
       state.game.pendingEvents = [];
       state.phase = 'transition';
       render();
-      if (state.game.status !== 'playing') { state.phase = 'gameover'; render(); return true; }
-      await startTurn();
       return true;
     }
 

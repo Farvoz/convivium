@@ -1454,10 +1454,12 @@ test('R1: после одного хода второй take доступен (p
   const act1 = c1.arrow ? null : (a1.canBuy ? 'buy' : 'discard');
   const progressed = await tc.decide(act1);
   assert.equal(progressed, true, 'decide должен продвинуть игру');
-  // pendingEvents заполнены до drain
+  // pendingEvents заполнены до drain, phase=transition до старта следующего хода
   assert.ok(tc.state.pendingEvents.length > 0, 'pendingEvents должен содержать события хода');
+  assert.equal(tc.state.phase, 'transition', 'phase после decide — transition (анимация до startTurn)');
   await tc.drainEvents();
   assert.equal(tc.state.pendingEvents.length, 0, 'после drain очередь пуста');
+  await tc.startTurn();
   assert.ok(['take', 'activate'].includes(tc.state.phase), `phase после хода должен быть take|activate, а не ${tc.state.phase}`);
   assert.equal(tc.state.game.deck.length, beforeLen - 1, 'колода уменьшилась на 1');
   const c2 = tc.take();
@@ -1478,6 +1480,8 @@ test('R2: 5 ходов подряд через контроллер без за�
     const act = card.arrow ? null : (a.canBuy ? 'buy' : 'discard');
     await tc.decide(act);
     await tc.drainEvents();
+    if (tc.state.game.status !== 'playing') { tc.state.phase = 'gameover'; break; }
+    await tc.startTurn();
     assertInvariants(tc.state.game);
     assert.ok(['take', 'activate', 'gameover'].includes(tc.state.phase), `ход ${i}: фаза ${tc.state.phase}`);
   }

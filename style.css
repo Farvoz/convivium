@@ -73,6 +73,7 @@ html, body {
   overflow: hidden;
 }
 .hidden { display: none !important; }
+#center-card.hidden { display: block !important; visibility: hidden; opacity: 0; pointer-events: none; }
 
 /* ---- buttons ---- */
 .btn-primary {

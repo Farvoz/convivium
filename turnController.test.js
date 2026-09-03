@@ -135,6 +135,10 @@ test('decide(discard): ход продвигается, колода умень�
   const progressed = await tc.decide('discard');
   assert.equal(progressed, true);
   assert.ok(tc.state.game.deck.length < before);
+  assert.equal(tc.state.phase, 'transition');
+  await tc.drainEvents();
+  if (tc.state.game.status === 'playing') await tc.startTurn();
+  else tc.state.phase = 'gameover';
   assert.ok(['take', 'activate', 'gameover'].includes(tc.state.phase));
 });
 
@@ -190,6 +194,9 @@ test('полный прогон до gameover без падений', async () =
     if (!card) break;
     const a = tc.assess();
     await tc.decide(a.arrow || a.intercepted ? null : (a.canBuy ? 'buy' : 'discard'));
+    await tc.drainEvents();
+    if (tc.state.game.status !== 'playing') { tc.state.phase = 'gameover'; break; }
+    await tc.startTurn();
     steps++;
   }
   assert.equal(tc.state.phase, 'gameover');

@@ -10,7 +10,7 @@ const {
   createGame, setup, getScore, getState, activate,
   runTurnStart, getTopCard, resolveTop, deriveThreatBreakdown, deriveScoreBreakdown,
   deriveThreatCount, isThreat, matches, conditionMet, deriveAsleepSet, derivePeekCount, isPerson, isBuyFree, deriveBuyCost, findInterceptor,
-  createTurnController, buildDeck, enableGesture, disableGesture,
+  createTurnController, buildDeck, enableGesture, disableGesture, getBuyLabel,
 } = globalThis.Convivium;
 
 // ---------------------------------------------------------------------------
@@ -492,9 +492,10 @@ function enableDecisionUI(card) {
 
 function showActions(canBuy) {
   const buyE = $('buy-e');
-  if (buyE) buyE.innerHTML = isBuyFree(tc.state.game, tc.state.topCard)
-    ? '<span class="pos">0⚡</span>'
-    : '<span class="neg">−' + deriveBuyCost(tc.state.game) + '⚡</span>';
+  if (buyE) {
+    const lbl = getBuyLabel(tc.state.game, tc.state.topCard);
+    buyE.innerHTML = `<span class="${lbl.cls}">${lbl.text}</span>`;
+  }
   $('btn-discard').classList.remove('hidden');
   $('btn-buy').classList.toggle('hidden', !canBuy);
   $('btn-discard').onclick = () => submitDecision('discard');
@@ -556,27 +557,28 @@ function disableSwipe() {
  * @param {ChoiceOverlayOptions} o
  * @returns {Promise<any>}
  */
+function resolveReorderWorking(o) {
+  if (Array.isArray(o.items) && o.items.length > 0) return o.items.slice();
+  if (Array.isArray(o.items) && o.items.length === 0 && o.count !== undefined) {
+    const n = derivePeekCount(tc.state.game, o.count);
+    if (n < 1) return [];
+    return tc.state.game.deck.slice(0, n);
+  }
+  if (!Array.isArray(o.items) && o.count !== undefined) {
+    const n = derivePeekCount(tc.state.game, o.count);
+    if (n < 1) return [];
+    return tc.state.game.deck.slice(0, n);
+  }
+  return o.items ? o.items.slice() : [];
+}
+
 function ChoiceOverlay(o) {
   return new Promise((resolve) => {
     const ov = $('choice-overlay');
     const variant = o.variant || 'compact';
 
     if (o.mode === 'reorder') {
-      // o.items приоритетен (передал turnController), иначе считаем через derivePeekCount
-      let working;
-      if (Array.isArray(o.items) && o.items.length >= 0) {
-        working = o.items.slice();
-        // если items пришёл пустой, а count задан — пересчитать (совместимость)
-        if (working.length === 0 && o.count !== undefined) {
-          const n = derivePeekCount(tc.state.game, o.count);
-          if (n < 1) { resolve([]); return; }
-          working = tc.state.game.deck.slice(0, n);
-        }
-      } else {
-        const n = derivePeekCount(tc.state.game, o.count);
-        if (n < 1) { resolve([]); return; }
-        working = tc.state.game.deck.slice(0, n);
-      }
+      const working = resolveReorderWorking(o);
       if (working.length < 1) { resolve([]); return; }
       currentChoice = {
         title: o.title,
@@ -614,17 +616,7 @@ async function promptChoiceAdapter(payload) {
     return new Promise((res) => enterBoardTarget(items, res, null));
   }
   if (payload.kind === 'reorder') {
-    // turnController уже передаёт count как число и items как срез; поддерживаем оба формата
-    let working;
-    if (Array.isArray(payload.items) && payload.items.length > 0) {
-      working = payload.items.slice();
-    } else {
-      const n = derivePeekCount(tc.state.game, payload.count);
-      if (n < 1) return [];
-      working = tc.state.game.deck.slice(0, n);
-    }
-    if (working.length < 1) return [];
-    return ChoiceOverlay({ title: 'Расставь карты: выбери верхнюю', items: working, mode: 'reorder', variant: 'detail' });
+    return ChoiceOverlay({ title: 'Расставь карты: выбери верхнюю', items: payload.items, count: payload.count, mode: 'reorder', variant: 'detail' });
   }
   if (payload.kind === 'interceptors') {
     const items = payload.items || [];

@@ -80,19 +80,13 @@ const OP_REGISTRY = {
       }
     },
     run(game, source, e) {
-      const zones = e.zone === 'both' ? [game.threat, game.home]
-        : e.zone === 'home' ? [game.home]
-        : [game.threat];
-      let pool = [];
-      for (const z of zones) {
-        pool.push(...z.filter((c) => {
-          if (z === game.threat && c.threat === false) return false;
-          return matches(game, c, e.filter || {});
-        }));
-      }
+      const pool = getDiscardTargetPool(game, source, e.filter || {}, e.zone || 'threat');
       if (pool.length) {
         const chosen = game.choose(pool);
         detachAttachments(game, chosen);
+        const zones = e.zone === 'both' ? [game.threat, game.home]
+          : e.zone === 'home' ? [game.home]
+          : [game.threat];
         for (const z of zones) removeFromZone(z, chosen);
         game.discard.push(chosen);
       }
@@ -215,7 +209,7 @@ const OP_REGISTRY = {
     kind: 'action', when: undefined, phaseable: true,
     validate(e, where) { validateMatch(e.filter, where + '.retrieveFromDiscard'); },
     run(game, source, e) {
-      const pool = game.discard.filter((c) => matches(game, c, e.filter || {}));
+      const pool = getDiscardPool(game, e.filter || {});
       if (!pool.length) return;
       const chosen = game.choose(pool);
       const card = pool.find((c) => c.name === (chosen && chosen.name)) || pool[0];
@@ -229,7 +223,7 @@ const OP_REGISTRY = {
     kind: 'action', when: undefined, phaseable: true,
     validate(e, where) { validateMatch(e.filter, where + '.playFromDiscard'); },
     run(game, source, e) {
-      const pool = game.discard.filter((c) => matches(game, c, e.filter || {}));
+      const pool = getDiscardPool(game, e.filter || {});
       if (!pool.length) return;
       const chosen = game.choose(pool);
       const card = pool.find((c) => c.name === (chosen && chosen.name)) || pool[0];
@@ -262,9 +256,7 @@ function validateMatch(m, where) {
     if (!['name', 'tags', 'person', 'zone'].includes(k)) throw new Error(`${where}: unknown match key ${k}`);
   }
   if (m.name !== undefined && typeof m.name !== 'string') throw new Error(`${where}: match.name string`);
-  if (m.tags !== undefined) {
-    if (!Array.isArray(m.tags) || !m.tags.every((t) => typeof t === 'string')) throw new Error(`${where}: match.tags string[]`);
-  }
+  if (m.tags !== undefined) validateTags(m.tags, `${where}: match.tags`);
   if (m.person !== undefined && typeof m.person !== 'boolean') throw new Error(`${where}: match.person boolean`);
   if (m.zone !== undefined && !['home', 'threat'].includes(m.zone)) throw new Error(`${where}: match.zone home|threat`);
 }
@@ -276,9 +268,7 @@ function validateCond(c, where) {
     if (!['name', 'tags'].includes(k)) throw new Error(`${where}: unknown cond key ${k}`);
   }
   if (c.name !== undefined && typeof c.name !== 'string') throw new Error(`${where}: cond.name string`);
-  if (c.tags !== undefined && (!Array.isArray(c.tags) || !c.tags.every((t) => typeof t === 'string'))) {
-    throw new Error(`${where}: cond.tags string[]`);
-  }
+  if (c.tags !== undefined) validateTags(c.tags, `${where}: cond.tags`);
 }
 
 function validateEffect(e, where, inActivate) {
@@ -301,9 +291,7 @@ function validateCard(c, idx) {
   if (c.arrow !== undefined && !['up', 'down'].includes(c.arrow)) throw new Error(`${where}: arrow up|down`);
   if (c.threat !== undefined && typeof c.threat !== 'boolean') throw new Error(`${where}: threat boolean`);
   if (c.vp !== undefined && typeof c.vp !== 'number') throw new Error(`${where}: vp number`);
-  if (c.tags !== undefined && (!Array.isArray(c.tags) || !c.tags.every((t) => typeof t === 'string'))) {
-    throw new Error(`${where}: tags string[]`);
-  }
+  if (c.tags !== undefined) validateTags(c.tags, where);
   if (c.cost !== undefined && c.cost !== '🔄') throw new Error(`${where}: cost 🔄`);
   if (c.costType !== undefined && !['discard', 'energy'].includes(c.costType)) {
     throw new Error(`${where}: costType discard|energy`);
@@ -429,6 +417,37 @@ function discardWithTarget(game, card) {
   if (!e) return null;
   const zone = e.in === 'threat' ? game.threat : game.home;
   return zone.find((t) => matches(game, t, e.match)) || null;
+}
+
+function getDiscardPool(game, filter) {
+  return game.discard.filter((c) => matches(game, c, filter || {}));
+}
+
+function getDiscardTargetPool(game, source, filter, zone) {
+  const zones = zone === 'both' ? [game.threat, game.home]
+    : zone === 'home' ? [game.home]
+    : [game.threat];
+  const pool = [];
+  for (const z of zones) {
+    for (const c of z) {
+      if (c === source) continue;
+      if (z === game.threat && c.threat === false) continue;
+      if (!matches(game, c, filter || {})) continue;
+      pool.push(c);
+    }
+  }
+  return pool;
+}
+
+function getBuyLabel(game, card) {
+  const free = isBuyFree(game, card);
+  if (free) return { free: true, text: '0⚡', cls: 'pos' };
+  const cost = deriveBuyCost(game);
+  return { free: false, cost, text: `−${cost}⚡`, cls: 'neg' };
+}
+
+function validateTags(arr, where) {
+  if (!Array.isArray(arr) || !arr.every((t) => typeof t === 'string')) throw new Error(`${where}: tags string[]`);
 }
 
 // --- иммутабельное копирование --------------------------------------------
@@ -675,13 +694,7 @@ function activate(game, name) {
   const card = [...game.home, ...game.threat].find((c) => c.name === name && c.cost === '🔄');
   if (!card) return game;
   if (asleep.has(card)) return game;
-  // Вася: если в сбросе нет места — активация недоступна, не тратим карту
-  const hasPlay = (card.activate || []).some((e) => e.op === 'playFromDiscard');
-  if (hasPlay) {
-    const op = (card.activate || []).find((e) => e.op === 'playFromDiscard');
-    const pool = game.discard.filter((c) => matches(game, c, op.filter || {}));
-    if (pool.length === 0) return game;
-  }
+  if (!canActivate(game, card)) return game;
   const g = cloneGame(game);
   const live = [...g.home, ...g.threat].find((c) => c.name === name && c.cost === '🔄');
   for (const e of live.activate || []) {
@@ -727,6 +740,38 @@ function deriveAwakePersonCount(game) {
 function derivePeekCount(game, countSpec) {
   if (countSpec === 'people') return Math.min(deriveAwakePersonCount(game), game.deck.length);
   return Math.min(countSpec || 0, game.deck.length);
+}
+
+// Универсальная проверка цели для 🔄-активации.
+// Карта считается активируемой, если хотя бы один её эффект:
+//  - проходит `if` (conditionMet),
+//  - хватает энергии (для costType:energy),
+//  - имеет непустой пул целей (для ops с filter/зоной/peek).
+// Используется и в engine.activate (гейт) и в TurnController.collectActivatable (подсветка).
+function canActivate(game, card) {
+  if (!card || card.cost !== '🔄') return false;
+  if (game.status !== 'playing') return false;
+  if (deriveAsleepSet(game).has(card)) return false;
+  const acts = card.activate || [];
+  if (acts.length === 0) return false;
+  for (const e of acts) {
+    if (e.if && !conditionMet(game, e.if)) continue;
+    if (card.costType === 'energy' && e.energycost !== undefined && game.energy < e.energycost) continue;
+    if (e.op === 'retrieveFromDiscard' || e.op === 'playFromDiscard') {
+      if (getDiscardPool(game, e.filter || {}).length === 0) continue;
+      return true;
+    } else if (e.op === 'discardTarget') {
+      if (getDiscardTargetPool(game, card, e.filter || {}, e.zone || 'threat').length === 0) continue;
+      return true;
+    } else if (e.op === 'peekReorder') {
+      const n = derivePeekCount(game, e.count);
+      if (n < 1) continue;
+      return true;
+    } else {
+      return true;
+    }
+  }
+  return false;
 }
 
 // Единый снапшот производных состояний за один проход. Раньше логика была
@@ -1000,6 +1045,7 @@ function buildDeck(opts = {}, rng = Math.random) {
   const obhod = withObhod ? all.find((c) => c.name === 'Обход') : null;
   const harmfulCards = all.filter((c) => isThreat(c) || c.arrow === 'down');
   const neutral = all.filter((c) => c.name !== 'Обход' && !harmfulCards.includes(c));
+  shuffle(neutral, rng);
 
   const prepN = neutral.slice(0, prep);
   const forChunks = neutral.slice(prep);
@@ -1041,5 +1087,6 @@ function buildDeck(opts = {}, rng = Math.random) {
 globalThis.Convivium = {
   createGame, setup, takeTurn, runTurnStart, getTopCard, resolveTop, activate, getState, getScore,
   deriveThreatCount, deriveThreatBreakdown, deriveScoreBreakdown, deriveStatus, deriveBuyCost, isThreat, validateCards, checkAttachInvariant,
-  matches, conditionMet, deriveAsleepSet, deriveAwakePersons, deriveAwakePersonCount, derivePeekCount, isPerson, isBuyFree, cloneCard, buildDeck, findInterceptor, findInterceptors, discardWithTarget, applyRevealPreEffects, applyRevealPostEffects,
+  matches, conditionMet, deriveAsleepSet, deriveAwakePersons, deriveAwakePersonCount, derivePeekCount, canActivate, isPerson, isBuyFree, cloneCard, buildDeck, findInterceptor, findInterceptors, discardWithTarget, applyRevealPreEffects, applyRevealPostEffects,
+  getDiscardPool, getDiscardTargetPool, getBuyLabel,
 };

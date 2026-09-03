@@ -5,8 +5,8 @@
 (function () {
   const {
     createGame, setup, runTurnStart, getTopCard, resolveTop, activate: engineActivate,
-    deriveAsleepSet, derivePeekCount, isBuyFree, deriveBuyCost, matches, deriveThreatCount, findInterceptors,
-    discardWithTarget,
+    derivePeekCount, isBuyFree, deriveBuyCost, matches, findInterceptors,
+    discardWithTarget, canActivate, getDiscardPool, getDiscardTargetPool, getBuyLabel,
   } = globalThis.Convivium;
 
   function createTurnController({ render, log, promptChoice }) {
@@ -19,18 +19,8 @@
     };
 
     function collectActivatable() {
-      const asleep = deriveAsleepSet(state.game);
       return [...state.game.home, ...state.game.threat]
-        .filter((c) => {
-          if (c.cost !== '🔄' || asleep.has(c)) return false;
-          const hasPlay = (c.activate || []).some((e) => e.op === 'playFromDiscard');
-          if (hasPlay) {
-            const f = (c.activate || []).find((e) => e.op === 'playFromDiscard').filter || {};
-            const pool = state.game.discard.filter((x) => matches(state.game, x, f));
-            if (pool.length === 0) return false;
-          }
-          return true;
-        })
+        .filter((c) => canActivate(state.game, c))
         .map((c) => c.name);
     }
 
@@ -39,9 +29,8 @@
       else if (card.arrow === 'down') log(card.name + ' → Дом');
       else if (action === 'discard') log('Сброс: ' + card.name + ' (+1⚡)');
       else {
-        const cost = deriveBuyCost(state.game);
-        log((isBuyFree(state.game, card) ? 'Куплено (бесплатно): ' : 'Куплено: ') +
-          card.name + (isBuyFree(state.game, card) ? '' : ` (−${cost}⚡)`));
+        const lbl = getBuyLabel(state.game, card);
+        log((lbl.free ? 'Куплено (бесплатно): ' : 'Куплено: ') + card.name + (lbl.free ? '' : ` (−${lbl.cost}⚡)`));
       }
     }
 
@@ -144,15 +133,22 @@
       const card = [...state.game.home, ...state.game.threat]
         .find((c) => c.name === name && c.cost === '🔄');
       if (!card) return;
-      if (deriveAsleepSet(state.game).has(card)) return;
+      if (!canActivate(state.game, card)) {
+        const hasDiscardPool = (card.activate || []).some((e) => e.op === 'playFromDiscard' || e.op === 'retrieveFromDiscard');
+        if (hasDiscardPool) log('Нечего достать — активация отменена');
+        else log('Нечего сбросить — активация отменена');
+        return;
+      }
 
-      const needsPlay = (card.activate || []).some((e) => e.op === 'playFromDiscard');
-      const needsTarget = (card.activate || []).some((e) => e.op === 'discardTarget');
-      const needsReorder = (card.activate || []).some((e) => e.op === 'peekReorder');
+      let opPlay = null, opTarget = null, opReorder = null;
+      for (const e of card.activate || []) {
+        if (!opPlay && e.op === 'playFromDiscard') opPlay = e;
+        else if (!opTarget && e.op === 'discardTarget') opTarget = e;
+        else if (!opReorder && e.op === 'peekReorder') opReorder = e;
+      }
       let chosen = null;
-      if (needsPlay) {
-        const op = (card.activate || []).find((e) => e.op === 'playFromDiscard');
-        const pool = state.game.discard.filter((c) => matches(state.game, c, op.filter || {}));
+      if (opPlay) {
+        const pool = getDiscardPool(state.game, opPlay.filter || {});
         if (pool.length === 0) {
           log('Нет мест в сбросе — активация отменена');
           return;
@@ -165,11 +161,8 @@
           state.game.choose = (opts) => opts.find((c) => c.name === picked.name) || opts[0];
         }
       }
-      if (needsTarget) {
-        const dt = (card.activate || []).find((e) => e.op === 'discardTarget');
-        const targetPool = dt
-          ? state.game.threat.filter((c) => c.threat !== false && matches(state.game, c, dt.filter || {}, 'threat'))
-          : [];
+      if (opTarget) {
+        const targetPool = getDiscardTargetPool(state.game, card, opTarget.filter || {}, opTarget.zone || 'threat');
         if (targetPool.length === 0) {
           log('Нечего сбросить — активация отменена');
           return;
@@ -181,9 +174,8 @@
           // removeFromZone не находит карту по ссылке и сброс не происходит.
           state.game.choose = (opts) => opts.find((c) => c.name === chosen.name) || opts[0];
       }
-      if (needsReorder) {
-        const op = (card.activate || []).find((e) => e.op === 'peekReorder');
-        const n = derivePeekCount(state.game, op.count);
+      if (opReorder) {
+        const n = derivePeekCount(state.game, opReorder.count);
         const items = state.game.deck.slice(0, n);
         const ordered = await promptChoice({ kind: 'reorder', count: n, items });
         // reorder обязан вернуть ровно n карт; иначе не меняем порядок колоды.

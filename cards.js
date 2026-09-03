@@ -200,7 +200,6 @@ const cards = [
     face: 'faces/face_vova.jpg',
     tags: ['man'],
     description: '⚡ Пока в Доме: при вскрытии Угрозы или авто-карты получи 1 энергию.',
-    vp: 1,
     effects: [
       { op: 'energyOnReveal', amount: 1 },
     ],

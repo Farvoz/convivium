@@ -1438,3 +1438,149 @@ test('I9: валидация DSL — неверный тип поля броса
 test('I10: валидация DSL — дубликат имени бросает', () => {
   assert.throws(() => validateCards([{ name: 'X' }, { name: 'X' }]), /duplicate/);
 });
+
+// ---- R. Регрессия перехода хода (pendingEvents / drainEvents) --------------
+
+test('R1: после одного хода второй take доступен (phase take, deck-1)', async () => {
+  const { createTurnController } = globalThis.Convivium;
+  const tc = createTurnController({ render() {}, log() {}, promptChoice() { return null; } });
+  const deck = ['Ваня', 'Оля', 'Денис', 'Шум', 'Большая вечеринка', 'Паша', 'Вова', 'Тост'].map((n) => cloneCard(byName[n]));
+  tc.newSession(deck);
+  await tc.choosePrep('Ваня');
+  const beforeLen = tc.state.game.deck.length;
+  const c1 = tc.take();
+  assert.ok(c1, 'первый take должен вернуть карту');
+  const a1 = tc.assess();
+  const act1 = c1.arrow ? null : (a1.canBuy ? 'buy' : 'discard');
+  const progressed = await tc.decide(act1);
+  assert.equal(progressed, true, 'decide должен продвинуть игру');
+  // pendingEvents заполнены до drain
+  assert.ok(tc.state.pendingEvents.length > 0, 'pendingEvents должен содержать события хода');
+  await tc.drainEvents();
+  assert.equal(tc.state.pendingEvents.length, 0, 'после drain очередь пуста');
+  assert.ok(['take', 'activate'].includes(tc.state.phase), `phase после хода должен быть take|activate, а не ${tc.state.phase}`);
+  assert.equal(tc.state.game.deck.length, beforeLen - 1, 'колода уменьшилась на 1');
+  const c2 = tc.take();
+  assert.ok(c2, 'второй take должен быть доступен (регрессия hidden center)');
+});
+
+test('R2: 5 ходов подряд через контроллер без застревания', async () => {
+  const { createTurnController } = globalThis.Convivium;
+  const tc = createTurnController({ render() {}, log() {}, promptChoice() { return null; } });
+  const deck = ['Ваня', 'Оля', 'Денис', 'Шум', 'Большая вечеринка', 'Паша', 'Вова', 'Тост', 'Комната 402', 'Плов'].map((n) => cloneCard(byName[n]));
+  tc.newSession(deck);
+  await tc.choosePrep('Ваня');
+  for (let i = 0; i < 5; i++) {
+    if (tc.state.game.status !== 'playing') break;
+    const card = tc.take();
+    assert.ok(card, `ход ${i}: take должен вернуть карту`);
+    const a = tc.assess();
+    const act = card.arrow ? null : (a.canBuy ? 'buy' : 'discard');
+    await tc.decide(act);
+    await tc.drainEvents();
+    assertInvariants(tc.state.game);
+    assert.ok(['take', 'activate', 'gameover'].includes(tc.state.phase), `ход ${i}: фаза ${tc.state.phase}`);
+  }
+  assert.ok(true);
+});
+
+test('R3: pendingEvents контракт — place/discard создают событие с зоной', async () => {
+  const { createTurnController } = globalThis.Convivium;
+  const tc = createTurnController({ render() {}, log() {}, promptChoice() { return null; } });
+  // Шум — arrow up → threat
+  {
+    tc.newSession(['Ваня', 'Оля', 'Денис', 'Шум'].map((n) => cloneCard(byName[n])));
+    await tc.choosePrep('Ваня');
+    tc.take();
+    await tc.decide(null);
+    assert.equal(tc.state.pendingEvents.length, 1);
+    assert.equal(tc.state.pendingEvents[0].type, 'place');
+    assert.equal(tc.state.pendingEvents[0].zone, 'threat');
+    await tc.drainEvents();
+  }
+  // Плов — neutral buy → home
+  {
+    tc.newSession(['Ваня', 'Оля', 'Денис', 'Плов'].map((n) => cloneCard(byName[n])));
+    await tc.choosePrep('Ваня');
+    const c = tc.take();
+    assert.equal(c.name, 'Плов');
+    await tc.decide('buy');
+    assert.equal(tc.state.pendingEvents[0].type, 'place');
+    assert.equal(tc.state.pendingEvents[0].zone, 'home');
+    await tc.drainEvents();
+  }
+  // Плов — discard → discard с gain
+  {
+    tc.newSession(['Ваня', 'Оля', 'Денис', 'Плов'].map((n) => cloneCard(byName[n])));
+    await tc.choosePrep('Ваня');
+    tc.take();
+    await tc.decide('discard');
+    assert.equal(tc.state.pendingEvents[0].type, 'discard');
+    assert.equal(tc.state.pendingEvents[0].zone, 'discard');
+    await tc.drainEvents();
+  }
+});
+
+test('R4: drainEvents чистит очередь и game.pendingEvents пуст', async () => {
+  const { createTurnController } = globalThis.Convivium;
+  let renderCalls = 0;
+  const tc = createTurnController({ render() { renderCalls++; }, log() {}, promptChoice() { return null; } });
+  tc.newSession(['Ваня', 'Оля', 'Денис', 'Шум'].map((n) => cloneCard(byName[n])));
+  await tc.choosePrep('Ваня');
+  tc.take();
+  await tc.decide(null);
+  assert.ok(tc.state.pendingEvents.length > 0);
+  assert.equal(tc.state.game.pendingEvents.length, 0, 'game.pendingEvents уже очищен при копировании');
+  const before = renderCalls;
+  await tc.drainEvents();
+  assert.equal(tc.state.pendingEvents.length, 0);
+  assert.ok(renderCalls > before, 'drainEvents должен вызывать render');
+});
+
+test('R5: Тост-каскад — pendingEvents содержат 4 события в порядке вскрытия', async () => {
+  const { createTurnController } = globalThis.Convivium;
+  const tc = createTurnController({ render() {}, log() {}, promptChoice() { return null; } });
+  // Тост + 3 карты каскада + остаток
+  const deck = ['Ваня', 'Оля', 'Денис', 'Тост', 'Большая вечеринка', 'Паша', 'Шум', 'Вова'].map((n) => cloneCard(byName[n]));
+  tc.newSession(deck);
+  await tc.choosePrep('Ваня');
+  const toast = tc.take();
+  assert.equal(toast.name, 'Тост');
+  await tc.decide('buy');
+  // Тост place + 3 revealAndPlay → всего 4 события
+  assert.equal(tc.state.pendingEvents.length, 4, `ожидалось 4 события (Тост + 3 каскада), получено ${tc.state.pendingEvents.length}`);
+  const zones = tc.state.pendingEvents.map((e) => e.zone);
+  // 0: Тост → home, 1: Большая вечеринка → home, 2: Паша → home, 3: Шум → threat
+  assert.deepEqual(zones, ['home', 'home', 'home', 'threat']);
+  assert.ok(tc.state.pendingEvents.every((e) => e.type === 'place'));
+  await tc.drainEvents();
+  assert.equal(tc.state.pendingEvents.length, 0);
+  assert.ok(tc.state.game.home.some((c) => c.name === 'Тост'));
+  assert.ok(tc.state.game.home.some((c) => c.name === 'Большая вечеринка'));
+  assert.ok(tc.state.game.threat.some((c) => c.name === 'Шум'));
+});
+
+test('R6: discardWith синтетика — consumed попадает в pendingEvents', async () => {
+  const { createTurnController } = globalThis.Convivium;
+  const tc = createTurnController({ render() {}, log() {}, promptChoice() { return null; } });
+  // Создаём карту с discardWith вручную (в колоде такой нет, проверяем контракт)
+  const stolCard = { name: 'Стол', tags: ['furniture'], effects: [{ op: 'discardWith', in: 'home', match: { name: 'Стол-цель' } }] };
+  const targetCard = { name: 'Стол-цель', tags: ['furniture'] };
+  const g = createGame({ deck: [cloneCard(stolCard)], rng: () => 0.5 });
+  g.home = [cloneCard(byName['Ваня']), cloneCard(targetCard)];
+  g.energy = 2;
+  g.status = 'playing';
+  g.turnPhase = 'idle';
+  tc.state.game = g;
+  tc.state.phase = 'take';
+  await tc.startTurn();
+  const card = tc.take();
+  assert.equal(card.name, 'Стол');
+  await tc.decide(null);
+  assert.equal(tc.state.pendingEvents.length, 1, 'consumed должен попасть в очередь');
+  assert.equal(tc.state.pendingEvents[0].type, 'consumed');
+  await tc.drainEvents();
+  assert.equal(tc.state.pendingEvents.length, 0);
+  assert.ok(tc.state.game.discard.some((c) => c.name === 'Стол'));
+  assert.ok(tc.state.game.discard.some((c) => c.name === 'Стол-цель'));
+});

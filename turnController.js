@@ -123,7 +123,8 @@
         // Мгновенный эффект связки: Стол + эта карта уходят в сброс, выбор
         // игрока не требуется (и перехват не применяется).
         state.game = resolveTop(state.game, null);
-        log('❗️ ' + card.name + ' и ' + dw.name + ' сброшены (Стол в Доме)');
+        state.pendingEvents = [...(state.game.pendingEvents || [])];
+        state.game.pendingEvents = [];
         state.phase = 'transition';
         render();
         if (state.game.status !== 'playing') { state.phase = 'gameover'; render(); return true; }

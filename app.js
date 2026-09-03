@@ -541,10 +541,9 @@ async function submitDecision(action) {
         }
       }
     });
-    $('center-card').innerHTML = '';
-    $('center-card').classList.add('hidden');
+    render();
   } else {
-    // fallback для мгновенных discardWith (нет pendingEvents) — старый fly
+    // fallback — не должно случаться после унификации pendingEvents, оставлено для совместимости
     const dir = (interceptor && !tc.state.instant) ? 'intercept' : flyDirection(card, action);
     $('center-card').classList.add('fly-' + dir);
     await wait(420);
@@ -556,6 +555,7 @@ async function submitDecision(action) {
         setTimeout(() => ownerEl.classList.remove('intercept-owner'), 900);
       }
     }
+    render();
   }
   busy = false;
   if (!progressed) enableDecisionUI(tc.state.topCard);

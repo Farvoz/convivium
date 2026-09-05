@@ -10,7 +10,7 @@ const {
   createGame, setup, getScore, getState, activate,
   runTurnStart, getTopCard, resolveTop, deriveThreatBreakdown, deriveScoreBreakdown,
   deriveThreatCount, isThreat, matches, conditionMet, deriveAsleepSet, derivePeekCount, isPerson, isBuyFree, deriveBuyCost, findInterceptor,
-  createTurnController, buildDeck, enableGesture, disableGesture, getBuyLabel,
+  createTurnController, buildDeck, enableGesture, disableGesture, getBuyLabel, getDiscardLabel,
 } = globalThis.Convivium;
 
 // ---------------------------------------------------------------------------
@@ -495,6 +495,11 @@ function showActions(canBuy) {
   if (buyE) {
     const lbl = getBuyLabel(tc.state.game, tc.state.topCard);
     buyE.innerHTML = `<span class="${lbl.cls}">${lbl.text}</span>`;
+  }
+  const discardE = $('discard-e');
+  if (discardE) {
+    const lbl = getDiscardLabel(tc.state.game, tc.state.topCard);
+    discardE.innerHTML = `<span class="${lbl.cls}">${lbl.text}</span>`;
   }
   $('btn-discard').classList.remove('hidden');
   $('btn-buy').classList.toggle('hidden', !canBuy);

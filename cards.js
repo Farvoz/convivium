@@ -218,6 +218,13 @@ const cards = [
     activate: [{ op: 'discardTarget', filter: {}, zone: 'both' }],
   },
   {
+    name: 'Денис',
+    face: 'faces/face_den.jpg',
+    tags: ['man'],
+    description: '⚡ Приглашать людей дешевле на 1⚡ (мин. 1⚡)',
+    effects: [{ op: 'addBuyCost', amount: -1, match: { person: true } }],
+  },
+  {
     name: 'Пронести алкашку',
     icon: '🍶',
     description: 'Старшекур теперь сбрасывает выбранную карту за 1⚡ (вместо сброса себя)',

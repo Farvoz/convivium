@@ -229,7 +229,10 @@ const OP_REGISTRY = {
   },
   addBuyCost: {
     kind: 'derive', phaseable: false,
-    validate(e, where) { if (typeof e.amount !== 'number') throw new Error(`${where}: addBuyCost.amount number`); },
+    validate(e, where) {
+      if (typeof e.amount !== 'number') throw new Error(`${where}: addBuyCost.amount number`);
+      if (e.match !== undefined) validateMatch(e.match, where + '.addBuyCost');
+    },
   },
   buyFreeIf: {
     kind: 'cond', phaseable: false,
@@ -510,7 +513,11 @@ function getRawThreatCount(game) {
 // По умолчанию (без match) перехватывает только настоящие угрозы (isThreat)
 // и авто-карты (arrow down); с match — любые карты, проходящие matches().
 // Срабатывает, только если у владельца ещё пусто «под ним» (нет attached).
+// Sleep-карты (Кровать) не перехватываются — их attach-эффект (накрыть человека)
+// обязателен; иначе они легли бы на не-человека (Слухи) и усыпили бы перехватчика
+// (баги «Слухи на кровати», «Оля захватила кровать но заснула»).
 function findInterceptors(game, card) {
+  if (card.sleep) return [];
   const eligible = [];
   for (const owner of inPlayCards(game)) {
     if (owner.attached && owner.attached.length) continue;
@@ -639,8 +646,18 @@ function detachTucked(game, card) {
 function getBuyLabel(game, card) {
   const free = isBuyFree(game, card);
   if (free) return { free: true, text: '0⚡', cls: 'pos' };
-  const cost = deriveBuyCost(game);
+  const cost = deriveBuyCost(game, card);
   return { free: false, cost, text: `−${cost}⚡`, cls: 'neg' };
+}
+
+function deriveDiscardGain(card) {
+  return (card && card.discardValue === 0 ? 0 : 1);
+}
+
+function getDiscardLabel(game, card) {
+  const gain = deriveDiscardGain(card);
+  if (gain === 0) return { gain: 0, text: '0⚡', cls: 'neg' };
+  return { gain: 1, text: '+1⚡', cls: 'pos' };
 }
 
 function validateTags(arr, where) {
@@ -793,7 +810,7 @@ function placeCard(g, card, action) {
   } else {
     if (action !== 'buy' && action !== 'discard') throw new Error(`invalid action for neutral card ${c.name}: ${action}`);
     const free = isBuyFree(g, c);
-    const cost = deriveBuyCost(g);
+    const cost = deriveBuyCost(g, c);
     if (action === 'buy' && (free || g.energy >= cost)) {
       const paid = free ? 0 : cost;
       g.energy -= paid;
@@ -816,7 +833,7 @@ function placeCard(g, card, action) {
       }
     } else if (action === 'discard') {
       pushDiscard(g, c);
-      const gain = (c.discardValue === 0 ? 0 : 1);
+      const gain = deriveDiscardGain(c);
       g.energy += gain;
       emit(g, { type: 'discard', card: cloneCard(c), zone: 'discard', gain });
     } else {
@@ -1261,15 +1278,23 @@ function getScore(game) {
 }
 
 // Стоимость покупки нейтральной карты: база 2 + сумма addBuyCost от карт в игре.
-// Грязь и подобные карты повышают цену; free-покупки (buyFreeIf) игнорируют её.
-function deriveBuyCost(game) {
+// Грязь и подобные карты повышают цену; Денис скидывает -1 для людей; free-покупки (buyFreeIf) игнорируют её.
+// Поддерживает фильтр match (только для кандидатов) и пол 1⚡. Спящие карты игнорируются.
+function deriveBuyCost(game, card) {
   let cost = 2;
+  const asleep = deriveAsleepSet(game);
   for (const c of inPlayCards(game)) {
+    if (asleep.has(c)) continue;
     for (const e of c.effects || []) {
-      if (e.op === 'addBuyCost') cost += e.amount;
+      if (e.op !== 'addBuyCost') continue;
+      if (e.match) {
+        if (!card) continue;
+        if (!matches(game, card, e.match)) continue;
+      }
+      cost += e.amount;
     }
   }
-  return cost;
+  return Math.max(1, cost);
 }
 
 // Вклады в итоговый счёт, точно суммирующиеся в getScore (для таблицы финала).
@@ -1415,5 +1440,5 @@ globalThis.Convivium = {
   createGame, setup, takeTurn, runTurnStart, getTopCard, resolveTop, activate, getState, getScore,
   deriveThreatCount, deriveThreatBreakdown, deriveScoreBreakdown, deriveStatus, deriveBuyCost, isThreat, validateCards, checkAttachInvariant,
   matches, conditionMet, deriveAsleepSet, deriveAwakePersons, deriveAwakePersonCount, derivePeekCount, canActivate, isPerson, isBuyFree, cloneCard, buildDeck, findInterceptor, findInterceptors, discardWithTarget, applyRevealPreEffects, applyRevealPostEffects,
-  getDiscardPool, getDiscardTargetPool, getBuyLabel,
+  getDiscardPool, getDiscardTargetPool, getBuyLabel, getDiscardLabel, deriveDiscardGain,
 };

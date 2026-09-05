@@ -6,7 +6,7 @@
   const {
     createGame, setup, runTurnStart, getTopCard, resolveTop, activate: engineActivate,
     derivePeekCount, isBuyFree, deriveBuyCost, matches, findInterceptors,
-    discardWithTarget, canActivate, getDiscardPool, getDiscardTargetPool, getBuyLabel,
+    discardWithTarget, canActivate, getDiscardPool, getDiscardTargetPool, getBuyLabel, deriveDiscardGain,
   } = globalThis.Convivium;
 
   function createTurnController({ render, log, promptChoice }) {
@@ -52,7 +52,7 @@
       if (card.arrow === 'up') log('Угроза: ' + card.name);
       else if (card.arrow === 'down') log(card.name + ' → Дом');
       else if (action === 'discard') {
-        const v = card.discardValue === 0 ? 0 : 1;
+        const v = deriveDiscardGain(card);
         log('Сброс: ' + card.name + (v ? ' (+1⚡)' : ' (0⚡)'));
       } else {
         const lbl = getBuyLabel(state.game, card);
@@ -110,7 +110,7 @@
       const card = state.topCard;
       const intercepted = findInterceptors(state.game, card).length > 0;
       const instant = !!(card && (card.effects || []).some((e) => e.op === 'discardWith') && discardWithTarget(state.game, card));
-      state.canBuy = state.game.energy >= deriveBuyCost(state.game) || isBuyFree(state.game, card);
+      state.canBuy = state.game.energy >= deriveBuyCost(state.game, card) || isBuyFree(state.game, card);
       state.instant = instant;
       return { arrow: !!(card && card.arrow), canBuy: state.canBuy, intercepted, instant };
     }

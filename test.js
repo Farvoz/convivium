@@ -327,7 +327,7 @@ test('D7: Натянуть струну (🔄) сбрасывает Порван
   assert.equal(s.threat.find((c) => c.name === 'Порванная струна'), undefined);
 });
 
-test('D8: Большая вечеринка даёт +1 ПО за каждого человека в игре (в конце)', () => {
+test('D8: Большая вечеринка даёт +1 ПО за каждые 2 человека в игре (в конце)', () => {
   // Без Оли/Слухиа в колоде, чтобы перехват не искажал подсчёт персон
   const g = createGame({ deck: [cloneCard(byName['Большая вечеринка'])] });
   g.home = [
@@ -337,8 +337,8 @@ test('D8: Большая вечеринка даёт +1 ПО за каждого
   const after = takeTurn(g, 'buy'); // Большая вечеринка -> Дом
   const s = getState(after);
   assert.ok(s.home.find((c) => c.name === 'Большая вечеринка'), 'Большая вечеринка в игре');
-  // persons: Ваня + Паша + Вася = 3 => scorePerPerson +3; их ПО: Ваня 1, Паша 0, Вася 0 => 4
-  assert.equal(getScore(after), 4);
+  // persons: Ваня + Паша + Вася = 3 => floor(3/2)=1 => scorePerPerson +1; их ПО: Ваня 1, Паша 0, Вася 0 => 2
+  assert.equal(getScore(after), 2);
 });
 
 // ---- T. Тост revealAndPlay (❗️ 3 карты) + discardValue 0 ----------------------
@@ -1266,7 +1266,7 @@ const GOLDEN = [
       }
       return g;
     },
-    expect: (g) => { assert.equal(getScore(g), 3); },
+    expect: (g) => { assert.equal(getScore(g), 2); },
   },
   {
     id: 'scoreRows: Большая вечеринка — одна строка, не две',
@@ -1434,9 +1434,9 @@ test('K1: итоговый счёт финала — attach-бонус + угр�
   g.status = 'won';
   // Ваня: 1(база) +1(Звёздный час) +1(бонус гитаристу) = 3
   // День рождения!: 2 ; Слухи/Оля/Большая вечеринка: 0
-  // scorePerPerson: 2 человека в игре (Слухи не человек) * 1 = 2
-  // итого: 3 + 2 + 2 = 7
-  assert.equal(getScore(g), 7);
+  // scorePerPerson: 2 человека в игре (Слухи не человек) => floor(2/2)=1
+  // итого: 3 + 2 + 1 = 6
+  assert.equal(getScore(g), 6);
   const rows = deriveScoreBreakdown(g);
   const sum = rows.reduce((s, r) => s + (r.value || 0), 0);
   assert.equal(sum, getScore(g), 'breakdown не суммируется в getScore');

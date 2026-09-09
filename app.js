@@ -516,10 +516,19 @@ function flyDirection(card, action) {
 async function submitDecision(action) {
   if (busy) return;
   busy = true;
+  // Забираем владение у жеста до await: отвязываем обработчики, но сохраняем
+  // inline-сдвиг, чтобы полет стартовал из текущей точки без прыжка в центр.
+  // disableGesture() здесь нельзя — он сбрасывает transform.
+  const cc = $('center-card');
+  cc.onpointerdown = cc.onpointermove = cc.onpointerup = cc.onpointercancel = null;
+  cc.classList.remove('dragging');
+  clearAutoTimer();
+  hideArrows();
   const card = tc.state.topCard;
   const interceptor = findInterceptor(tc.state.game, card);
   const progressed = await tc.decide(action);
   if (!progressed) {
+    cc.style.transform = '';
     busy = false;
     enableDecisionUI(tc.state.topCard);
     return;
@@ -530,6 +539,7 @@ async function submitDecision(action) {
       if (ev.type === 'deathReveal') {
         const wrap = $('center-card');
         wrap.className = '';
+        wrap.style.transform = '';
         wrap.innerHTML = '';
         wrap.appendChild(CardView(ev.card, { variant: 'detail' }));
         wrap.classList.remove('hidden');
@@ -548,7 +558,10 @@ async function submitDecision(action) {
       else if (ev.zone === 'home') dir = 'down';
       else if (ev.zone === 'discard') dir = ev.gain ? 'left' : 'left';
       else dir = flyDirection(ev.card, action);
+      // Рендерим сдвинутую позицию, затем атомарно снимаем inline + ставим
+      // fly-класс: transition анимирует от сдвига к краю без прерывания.
       void wrap.offsetWidth;
+      wrap.style.transform = '';
       wrap.classList.add('fly-' + dir);
       await wait(520);
       wrap.classList.add('hidden');
@@ -574,6 +587,7 @@ async function submitDecision(action) {
   } else {
     // fallback — не должно случаться после унификации pendingEvents
     const wrap = $('center-card');
+    wrap.style.transform = '';
     const dir = (interceptor && !tc.state.instant) ? 'intercept' : flyDirection(card, action);
     wrap.classList.add('fly-' + dir);
     await wait(420);

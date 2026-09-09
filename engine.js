@@ -1206,7 +1206,7 @@ function deriveSnapshot(game) {
       if (e.op === 'scorePerPerson') {
         if (e.if && !conditionMet(game, e.if)) continue;
         const persons = deriveAwakePersonCount(game);
-        const add = e.amount * persons;
+        const add = e.amount * Math.floor(persons / 2);
         if (add) {
           vp.set(c, (vp.get(c) || 0) + add);
           const row = bd.get(c) || [];

@@ -143,6 +143,19 @@
         if (chosen === null) return;
         state.game.choose = () => chosen;
       }
+      // Мгновенный enter-эффект discardTarget (Договориться и т.п.)
+      const enterTargetEffects = (state.topCard && (state.topCard.effects || []).filter(
+        (e) => e.op === 'discardTarget' && (!e.when || e.when === 'enter')
+      )) || [];
+      if (enterTargetEffects.length > 0) {
+        const e = enterTargetEffects[0];
+        const targetPool = getDiscardTargetPool(state.game, state.topCard, e.filter || {}, e.zone || 'threat');
+        if (targetPool.length > 0) {
+          const chosen = await promptChoice({ kind: 'threats', items: targetPool, source: state.topCard.name });
+          if (chosen === null) return false;
+          state.game.choose = (opts) => opts.find((c) => c.name === chosen.name) || opts[0];
+        }
+      }
       state.game = resolveTop(state.game, action);
       state.game.choose = (opts) => opts[0];
       // универсальная очередь: engine.pendingEvents → turnController.pendingEvents

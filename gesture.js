@@ -24,14 +24,20 @@
       el.classList.remove('dragging');
       const movedX = e.clientX - startX;
       const movedY = e.clientY - startY;
-      el.style.transform = '';
+      const action = decide ? decide(dx) : null;
       startX = null; startY = null;
       if (onTap && Math.abs(movedX) < 8 && Math.abs(movedY) < 8) {
+        el.style.transform = '';
         onTap();
         return;
       }
-      const action = decide ? decide(dx) : null;
-      if (action) perform(action);
+      if (action) {
+        // Не сбрасываем inline-сдвиг: владелец (submitDecision) продолжит
+        // полет из этой точки атомарным снятием transform + fly-классом.
+        perform(action);
+        return;
+      }
+      el.style.transform = '';
     };
     el.onpointercancel = () => {
       if (onStart) onStart();
